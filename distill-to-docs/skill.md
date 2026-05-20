@@ -16,7 +16,7 @@ Extract session learnings into project docs so future agents don't repeat the sa
 
 ## Step 1 — Read the project doc structure
 
-Before deciding where to write, understand how *this* project organises agent docs. Projects vary:
+Before deciding where to write, understand how _this_ project organises agent docs. Projects vary:
 some use CLAUDE.md as the canonical rules file; others use it only as a pointer to AGENTS.md.
 
 Read `CLAUDE.md` and `AGENTS.md` at the repo root. Note which file owns which kind of rule, and
@@ -25,9 +25,17 @@ files relevant to the session's work).
 
 ## Step 2 — Check existing hooks
 
-Read `.claude/settings.json` (and `~/.claude/settings.json` if relevant). Any command pattern
-already blocked or redirected by a hook is already enforced — skip adding it to docs, since that
-would be redundant and could create conflicting guidance.
+Read `.claude/settings.json` (and `~/.claude/settings.json` if relevant). Then read the hook
+scripts themselves.
+
+Two things to check:
+
+1. **What hooks already enforce** — don't propose doc additions for behaviors a hook already
+   blocks or redirects. Redundant docs create noise and conflicting guidance.
+
+2. **Whether hook messages are accurate** — hooks often embed example commands in their error
+   output (e.g. "Run: supabase gen types ..."). If the session revealed that command is
+   wrong or outdated, flag the hook script itself as a target for correction.
 
 ## Step 3 — Scan the conversation for learnings
 
@@ -53,12 +61,15 @@ to the right file:
 - Global tooling commands and agent workflow rules → whichever root file owns that kind of rule
 - Codebase-wide conventions and constraints → the other root file
 - Findings specific to one app or package → the nearest scoped doc for that area
+- Stale commands in hook error messages → the hook script itself
 
 ## Step 5 — Propose before writing
 
 Show the user a preview of proposed additions grouped by target file before touching anything.
 Format as approximate diffs — the new lines clearly attributed to their destination. Keep each
 entry concise: one bullet or one short sentence per finding.
+
+Include hook script corrections in the preview if any were found in Step 2.
 
 Ask the user to confirm, edit, or drop items. Only proceed once they approve.
 
