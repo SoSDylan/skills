@@ -141,7 +141,7 @@ trello-cli --update-card <full-card-id> --desc "<spec + original notes>"
 
 ### 8. Confirm
 
-One sentence: the card name, that the spec was written, and the count of any Open questions left.
+One sentence: the card name, that the spec was written, and the count of any Open questions left. Include the card URL from `data.url` so the user doesn't have to scroll back to find it.
 
 ## Error handling
 
