@@ -69,7 +69,38 @@ Before touching code, form a clear internal picture:
 
 If answers contradict the spec, prefer the answers — they represent later, more specific decisions.
 
-### 6. Explore before implementing
+### 6. Create a branch
+
+Before implementing, ensure the work happens on a dedicated branch.
+
+Check the current branch:
+
+```bash
+git branch --show-current
+```
+
+**If the current branch seems related to the card's feature or fix**, use it — proceed to step 7.
+
+**Otherwise, create a new branch:**
+
+Infer `feature/` or `fix/` from the card content:
+- `feature/` — new functionality, additions, enhancements
+- `fix/` — bug repairs, regressions, broken behaviour
+
+If ambiguous, ask the user.
+
+Derive the branch name from the card title:
+1. Slugify: lowercase, replace spaces/special chars with `-`, collapse runs of `-`, trim leading/trailing `-`
+2. Cap at 50 chars (trim at a word boundary if possible)
+3. Prepend the prefix: `feature/<slug>` or `fix/<slug>`
+
+```bash
+git checkout -b <prefix>/<slug>
+```
+
+Confirm the branch to the user before proceeding.
+
+### 7. Explore before implementing
 
 Read `CLAUDE.md` at the project root (if it exists) for conventions. Then explore the relevant parts of the codebase to understand:
 - Where the change belongs
@@ -78,13 +109,13 @@ Read `CLAUDE.md` at the project root (if it exists) for conventions. Then explor
 
 Don't guess at structure — look it up first.
 
-### 7. Implement
+### 8. Implement
 
 Do the work. Follow project conventions. Make the changes.
 
 If an assumption had to be made due to a missing or ambiguous answer, note it — don't silently guess and move on.
 
-### 8. Report
+### 9. Report
 
 When done, tell the user:
 - What was changed (files + brief description)
