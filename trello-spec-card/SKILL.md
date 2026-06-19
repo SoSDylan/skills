@@ -106,10 +106,20 @@ person picking this up doesn't have to re-litigate it.
 Print a brief summary of the spec: card name, the "What to build" section, and acceptance criteria count.
 Ask the user if they want any changes before writing it to Trello.
 
-- If they want changes, iterate on the spec and re-show the updated version.
-- If they confirm, proceed to step 7.
+**Never write to the card until the user has given explicit approval in direct response to the
+current version of the spec.** Treat this as a loop, not a one-time gate:
+
+- If they want changes, iterate on the spec, re-show the updated version, and ask for approval
+  again. A request for changes is *not* approval — making the edits does not grant permission to
+  write. Every change resets the approval; you must ask again after each one.
+- Only proceed to step 7 when the user explicitly confirms the spec as currently shown (e.g.
+  "yes", "write it", "looks good — push it"). If their reply contains both a change and what could
+  be read as approval, treat it as a change request: apply it, re-show, and ask again.
+- If you are unsure whether what they said counts as approval, do not write — ask.
 
 ### 7. Write the spec back to the card
+
+Only after explicit approval in step 6.
 
 Replace the description with the spec, preserving the original at the bottom so nothing is lost:
 
