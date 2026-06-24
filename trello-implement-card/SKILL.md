@@ -1,17 +1,17 @@
 ---
 name: trello-implement-card
 description: >
-  Fetch a Trello card that has been prepped with answered Q&A sections (by trello-grill-card),
-  synthesise the requirements from all three answer sections (client, management, developers),
-  then implement the work. Activate when the user pastes a Trello card URL and wants to do the
-  work — phrases like "implement this", "do this card", "work on this", "ship this", or just
-  pasting a URL after the grill/answer step. Do NOT activate for grilling or prepping cards —
-  that's trello-grill-card's job.
+  Fetch a Trello card that has been turned into a ready-to-work spec by trello-spec-card,
+  synthesise the requirements from the spec sections, then implement the work. Activate when
+  the user pastes a Trello card URL and wants to do the work — phrases like "implement this",
+  "do this card", "work on this", "ship this", or just pasting a ready-specced Trello card URL.
+  Do NOT activate when the user wants to flesh out/spec/grill a card first — that's
+  trello-spec-card's job.
 ---
 
 # Trello Implement Card
 
-Fetch an answered Trello card and implement the described work.
+Fetch a ready-to-work Trello spec card and implement the described work.
 
 ## Workflow
 
@@ -33,41 +33,57 @@ trello-cli --get-card <SHORTLINK>
 Grab from the JSON response:
 - `data.id` — full card ID
 - `data.name` — card title
-- `data.desc` — description (contains original spec + Q&A)
+- `data.desc` — description, expected to be the ready-to-work spec from `trello-spec-card`
+- `data.url` — card URL, useful for final reporting
 
-### 3. Parse the description
+### 3. Parse the spec
 
-Split the description on the `---` separator.
+`trello-spec-card` writes the active implementation spec at the top of the description, and preserves old notes below `---`:
 
-- **Above `---`**: original spec / feature description
-- **Below `---`**: Q&A block with three sections
+```
+<ready-to-work spec>
 
-Extract answers from each section heading:
-- `**For the client:**` → UX intent, business goals, success criteria
-- `**For management:**` → scope boundaries, constraints, priorities
-- `**For developers:**` → technical decisions, API contracts, edge cases
+---
 
-Each answer follows its question as `**Answer:** <text>`. An answer is blank if it's empty or only whitespace after the colon.
+## Original notes
 
-### 4. Check answers before proceeding
+<old description>
+```
 
-Tally blank answers per section. If **all answers in any section are blank**, warn the user:
+Use **only the content above the first `---` as the source of truth**. Treat the preserved `Original notes` as historical context only; do not let it override the spec.
 
-> "The [section] questions have no answers yet. Proceeding without them risks wrong scope/implementation. Continue anyway?"
+Extract these sections when present:
 
-A partially answered section is fine — proceed. Only halt on a completely empty section, since that usually means a stakeholder hasn't been consulted at all.
+- `## What to build` — feature intent and end-to-end behaviour
+- `## Acceptance criteria` — concrete done conditions
+- `## Context & decisions` — scope decisions, constraints, assumptions, rationale
+- `## Out of scope` — explicit exclusions
+- `## Blocked by / dependencies` — prerequisites
+- `## Open questions` — unresolved items
 
-Developer answers are the highest-stakes for implementation correctness. Flag those missing most loudly.
+If the description has no `---`, treat the full description as the active spec. If the description is unstructured, still proceed from the title + description, but flag that no structured spec was found.
+
+### 4. Check readiness
+
+Do **not** look for Q&A answer sections; this skill consumes the final spec produced by `trello-spec-card`.
+
+Before coding, check:
+
+- If `## What to build` or acceptance criteria are missing, warn that the spec may be thin, then proceed unless the user asked for strict gating.
+- If `## Blocked by / dependencies` names an unmet blocker, stop and ask whether to proceed anyway.
+- If `## Open questions` exists, decide whether any question blocks implementation:
+  - blocking or scope-changing question → ask before coding
+  - non-blocking question → proceed and note the assumption in the final report
 
 ### 5. Synthesise requirements
 
 Before touching code, form a clear internal picture:
 
-- **What**: original spec + client answers define the feature intent
-- **Boundaries**: management answers define what's in/out of scope
-- **How**: developer answers define architecture, data contracts, and edge cases to handle
+- **What**: `What to build` + acceptance criteria define the required behaviour
+- **Boundaries**: `Out of scope` and `Context & decisions` define what not to do
+- **How/constraints**: `Context & decisions`, dependencies, and codebase patterns guide implementation
 
-If answers contradict the spec, prefer the answers — they represent later, more specific decisions.
+If the preserved original notes contradict the active spec, prefer the active spec.
 
 ### 6. Create a branch
 
@@ -113,18 +129,19 @@ Don't guess at structure — look it up first.
 
 Do the work. Follow project conventions. Make the changes.
 
-If an assumption had to be made due to a missing or ambiguous answer, note it — don't silently guess and move on.
+If an assumption had to be made due to a missing/ambiguous spec item or non-blocking open question, note it — don't silently guess and move on.
 
 ### 9. Report
 
 When done, tell the user:
 - What was changed (files + brief description)
-- Any assumptions made where answers were missing or unclear
+- Any assumptions made where the spec was missing or unclear
+- Any verification run, if applicable
 
 Keep it tight — no padding.
 
 ## Error handling
 
 - `--get-card` returns `ok: false` → report the error, stop.
-- Description has no `---` separator → treat the whole description as the spec, skip Q&A parsing, proceed with just the title + spec.
-- Card has no description at all → implement from the title alone, flag that there was no spec to work from.
+- Card has no description → implement from the title alone only if the user confirms; flag that there was no spec to work from.
+- Description is only preserved `Original notes` with no active spec → treat it as unspecced and ask whether to proceed or run `trello-spec-card` first.
