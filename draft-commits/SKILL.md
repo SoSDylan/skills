@@ -14,6 +14,7 @@ Turn a pile of uncommitted changes into one or more clean commits that match the
 - **Single-line commit messages only.** Never use a multi-line message or a body. Just the title.
 - **Reuse the repo's own commit style.** Infer it from the last 12 commits — do not impose `feat:`/`fix:` if the repo doesn't use prefixes.
 - **Group related files into separate commits** with one title each. Don't dump everything into one commit unless the changes are genuinely one logical unit.
+- **Suggest the target branch with the commit plan.** The user should review branch + commit structure together before approving.
 
 ## Workflow
 
@@ -84,11 +85,39 @@ For each commit:
 
 ### 4. Present the draft to the user
 
-Show a clear, reviewable plan where **each commit explains itself** — a title, a one-line plain-language summary of what changed and why, then the files. Do not just dump a file list; the user must be able to understand each change without opening the diffs.
+Show a clear, reviewable plan where **the branch and each commit explain themselves**. Do not just dump a file list; the user must be able to understand the target branch and each change without opening the diffs.
+
+Before presenting the plan, suggest the branch that should receive the commits:
+
+1. Check the current branch:
+
+   ```bash
+   git branch --show-current
+   ```
+
+2. If the current branch seems related to the planned commits, suggest using it.
+3. Otherwise, suggest creating a new branch.
+
+For new branches, infer the prefix from the planned commit contents:
+
+- `feature/` — new functionality, additions, enhancements
+- `fix/` — bug repairs, regressions, broken behaviour
+- `chore/` — docs, config, refactors, maintenance, or other non-user-facing work
+
+If ambiguous, ask the user to choose the branch prefix as part of the review.
+
+Derive the branch name from the primary commit title or overall change summary:
+
+1. Slugify: lowercase, replace spaces/special chars with `-`, collapse runs of `-`, trim leading/trailing `-`
+2. Cap at 50 chars (trim at a word boundary if possible)
+3. Prepend the prefix: `feature/<slug>`, `fix/<slug>`, or `chore/<slug>`
 
 Format:
 
 ```
+Suggested branch: create feature/<slug>
+  Based on the main change: <brief reason>
+
 Commit 1 — <title in repo style>
   <one line: what this commit changes and why>
   M  src/foo.ts
@@ -101,7 +130,13 @@ Commit 2 — <title in repo style>
 Untracked (ask): config/local.json
 ```
 
-Then ask the user to review and request changes.
+If suggesting the current branch, format the first line as:
+
+```
+Suggested branch: use current branch <branch-name>
+```
+
+Then ask the user to review the branch and commit plan and request changes.
 
 ### 5. Apply requested changes and re-confirm
 
@@ -115,7 +150,29 @@ If the user asks for edits (regrouping, renaming a title, dropping files, splitt
 
 If the user only asks a question or clarifies something without changing the plan, you do not need to re-confirm — but never commit until you have an explicit "looks good / commit it" on the current plan.
 
-### 6. Commit (only after explicit approval)
+### 6. Create or confirm the approved branch (only after plan approval)
+
+Before creating commits, ensure they land on the branch approved in the plan.
+
+Check the current branch:
+
+```bash
+git branch --show-current
+```
+
+If the approved plan says to use the current branch and it is still the same branch, continue.
+
+If the approved plan says to create a new branch, create exactly the approved branch:
+
+```bash
+git checkout -b <approved-branch>
+```
+
+If the current branch has changed since the plan was approved, or if the approved branch already exists, stop and ask the user how to proceed.
+
+Briefly confirm the actual branch to the user before committing.
+
+### 7. Commit (only after explicit approval)
 
 Execute the commits in order. For each commit:
 
@@ -132,7 +189,7 @@ Rules:
 
 If any `git add` or `git commit` fails (e.g. pre-commit hook), stop, report the error, and ask the user how to proceed. Do not silently retry or force.
 
-### 7. Final report
+### 8. Final report
 
 After all commits land, show:
 
@@ -150,8 +207,10 @@ so the user can see the new commits and any remaining changes.
 - [ ] Inspect real diffs, not just filenames
 - [ ] Split by concern using repo conventions (backend model+migration, serializer+viewset+tests; frontend data layer vs UI)
 - [ ] Each commit has a one-line plain-language summary, not just a file list
-- [ ] Present plan; ask for review
+- [ ] Suggest target branch with the commit plan
+- [ ] Present branch + commit plan; ask for review
 - [ ] On any change: update plan and re-confirm
 - [ ] Commit only on explicit "looks good / commit it"
+- [ ] Before committing, create or confirm the approved branch
 - [ ] One `-m` string per commit, no body, no newlines
 - [ ] Report hashes + final `git log` / `git status`
