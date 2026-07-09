@@ -1,136 +1,125 @@
 ---
 name: trello-spec-card
 description: >
-  Fetch a Trello card by URL, run grill-with-docs to flesh it out with the user,
-  then write the approved spec back to the card. Use when the user wants to spec,
-  grill, flesh out, or make a Trello card ready to pick up. Do not use for
-  implementation; use trello-implement-card instead.
+  Fetch a Trello card, gather its Trello context, run /grill-with-docs to clarify
+  intent, delegate spec writing to /to-spec, then publish the approved spec back
+  to the same Trello card. Use when the user wants to spec, flesh out, or make a
+  Trello card ready for agent implementation. Do not use for implementation; use
+  trello-implement-card instead.
 ---
 
 # Trello Spec Card
 
-Owns Trello fetch/update and final spec publishing. Delegates all grilling to
-`grill-with-docs`.
+Thin Trello adapter around `/grill-with-docs` and `/to-spec`.
+
+This skill owns only:
+
+- what Trello context to fetch
+- how to publish the approved result back to Trello
+
+It must not maintain its own spec template, grilling flow, or card-breakdown
+method. Delegate intent discovery to `/grill-with-docs`, delegate spec writing to
+`/to-spec`, and read `/to-tickets` for the project's ticket/blocking-edge
+document conventions when ticket-shaped output is relevant.
 
 ## Workflow
 
-### 1. Fetch the card and attachments
+### 1. Fetch Trello context
 
-Parse the short link from `/c/SHORTLINK`, then run:
+Parse the short link from `/c/SHORTLINK`.
 
-```bash
-trello-cli --get-card <SHORTLINK>
-trello-cli --get-comments <SHORTLINK>
-trello-cli --list-attachments <SHORTLINK>
-```
+Use the `/trello-cli` skill for command syntax, JSON handling, and Trello error
+rules. Fetch:
 
-Keep `data.id`, `data.name`, `data.desc`, and `data.url` from the card, and
-keep every attachment's `id`, `name`, `url`, `mimeType`, `bytes`, `isUpload`, and
-`fileName`.
+- Card fields: `data.id`, `data.name`, `data.desc`, `data.url`
+- Comments
+- Attachment list/metadata
 
-Download and read every attachment before grilling:
+For attachments, preserve name, URL, MIME type, size, upload-vs-URL status, and
+any local/visible content you can safely read with available tools. If an
+attachment cannot be read, keep the metadata and note the failure explicitly.
+Do not silently drop attachments.
 
-1. Create a temporary attachment directory, e.g. `/tmp/trello-card-<SHORTLINK>-attachments/`.
-2. For uploaded Trello attachments (`isUpload: true`), download the `url` with
-   Trello auth. `trello-cli` does not download attachments directly; use the
-   same credentials from `TRELLO_API_KEY` / `TRELLO_TOKEN` or the saved
-   `~/.trello-cli/config.json` without printing secrets.
+### 2. Clarify intent with `/grill-with-docs`
 
-   ```bash
-   curl -fL \
-     -H "Authorization: OAuth oauth_consumer_key=\"$TRELLO_API_KEY\", oauth_token=\"$TRELLO_TOKEN\"" \
-     -o "/tmp/trello-card-<SHORTLINK>-attachments/<safe-file-name>" \
-     "<attachment.url>"
-   ```
+Before writing the spec, run `/grill-with-docs` with the fetched Trello context
+so the agent understands the card, the user's intent, project vocabulary, and any
+important decisions.
 
-3. For URL attachments (`isUpload: false`), fetch/read the URL if it is directly
-   accessible; otherwise preserve the URL and note that it could not be read.
-4. Read downloaded files according to type:
-   - Images: use the `read` tool on the image file and capture the visible
-     requirements/design details.
-   - Plain text/Markdown/JSON/CSV/code: read the text directly.
-   - PDFs/docs/spreadsheets: extract text with available local tools
-     (`pdftotext`, `textutil`, `python`, etc.) and summarize any relevant tables
-     or screenshots.
-   - Unknown/binary files: record metadata and any read/extraction failure.
-
-If any attachment cannot be downloaded or read, continue, but include the failure
-in the grill context as an attachment note/open dependency. Do not silently ignore
-attachments.
-
-### 2. Run `grill-with-docs`
-
-Delegate to the `grill-with-docs` skill by name.
-
-Pass this context into the grill:
+Pass this context into `/grill-with-docs`:
 
 ```markdown
 We are turning this Trello card into a pickup-ready spec.
 
-Card: <data.name>
-URL: <data.url>
-Description:
+Trello card:
+- ID: <data.id>
+- Title: <data.name>
+- URL: <data.url>
+
+Current description:
 <data.desc or "(empty)">
+
 Comments:
 <comments or "(none)">
 
 Attachments:
-<for each attachment: name, mimeType, bytes, source URL, local path if downloaded,
-and extracted text or visual summary; include download/read failures explicitly;
-use "(none)" if there are no attachments>
+<metadata plus extracted/readable content or explicit read failures; "(none)" if none>
 
-Need resolved: scope, acceptance criteria, decisions, out of scope, dependencies,
-and real open questions.
-
-Do not update Trello. Return here for synthesis and publishing.
+Goal: clarify the user's intent and any project/domain decisions needed before
+writing the spec. Do not update Trello. Return the resolved understanding here
+for `/to-spec`.
 ```
 
-### 3. Write the spec
+Let `/grill-with-docs` own the interview, code/docs checks, glossary updates,
+and ADR suggestions. Do not duplicate its questioning method here.
 
-After the grill, synthesise:
+### 3. Delegate spec writing
+
+Before drafting, read the `/to-spec` skill instructions and the `/to-tickets`
+skill instructions. Use their document shapes and vocabulary instead of defining
+a Trello-specific spec format here.
+
+Pass `/to-spec` the fetched Trello context plus the resolved understanding from
+`/grill-with-docs`, and make the publish target explicit:
 
 ```markdown
-## What to build
+Turn this Trello card context and clarified intent into a pickup-ready spec.
 
-<end-to-end behaviour and intent>
+Trello card:
+- ID: <data.id>
+- Title: <data.name>
+- URL: <data.url>
 
-## Acceptance criteria
+Current description:
+<data.desc or "(empty)">
 
-- [ ] <testable criterion>
+Comments:
+<comments or "(none)">
 
-## Context & decisions
+Attachments:
+<metadata plus extracted/readable content or explicit read failures; "(none)" if none>
 
-- <decision and why>
+Clarified intent from `/grill-with-docs`:
+<resolved understanding, decisions, terminology, open questions, and any docs/ADR updates>
 
-## Out of scope
-
-- <excluded item> <!-- omit if empty -->
-
-## Blocked by / dependencies
-
-- <dependency, or "None — can start immediately">
-
-## Open questions
-
-- <unresolved question> <!-- omit if empty -->
+Publish target: this same Trello card. Return the final markdown spec here for
+Trello publishing; do not update Trello directly.
 ```
 
-### 4. Get approval
+Let `/to-spec` own synthesis, seams, wording, scope, and approval checks.
 
-Show the user the spec summary and ask whether to write it to Trello.
+### 4. Publish to Trello after approval
 
-Do not update the card until the user explicitly approves the current version. If
-they request changes, revise, show it again, and ask again.
+Only update Trello after the user has explicitly approved the exact markdown to
+publish.
 
-### 5. Update Trello
+When publishing:
 
-Use the full card ID, not the short link:
-
-```bash
-trello-cli --update-card <data.id> --desc "<spec>"
-```
-
-If the original description was non-empty, append it below the spec:
+- Use the full card ID (`data.id`), not the short link.
+- Use `/trello-cli` for the update command.
+- Replace the card description with the approved spec.
+- If the original description was non-empty and is not already preserved in the
+  approved spec, append it under:
 
 ```markdown
 ---
@@ -140,13 +129,9 @@ If the original description was non-empty, append it below the spec:
 <original data.desc exactly>
 ```
 
-### 6. Confirm
+Check the Trello command response. If it reports `ok: false`, report the error
+and print the full markdown so the user can paste it manually.
 
-Say the card name, that the spec was written, open-question count, and `data.url`.
+### 5. Confirm
 
-## Errors
-
-- If fetch/update/list-attachments returns `ok: false`, report the error.
-- If an attachment cannot be downloaded or read, report which attachment failed
-  and why; include that in the grill context instead of dropping it.
-- If update fails, print the full spec so the user can paste it manually.
+Report the card title, Trello URL, and that the approved spec was written.

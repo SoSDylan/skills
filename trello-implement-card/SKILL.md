@@ -1,116 +1,90 @@
 ---
 name: trello-implement-card
 description: >
-  Fetch a Trello card that has been turned into a ready-to-work spec by trello-spec-card,
-  synthesise the requirements from the spec sections, then implement the work. Activate when
-  the user pastes a Trello card URL and wants to do the work — phrases like "implement this",
-  "do this card", "work on this", "ship this", or just pasting a ready-specced Trello card URL.
-  Do NOT activate when the user wants to flesh out/spec/grill a card first — that's
-  trello-spec-card's job.
+  Fetch a Trello card that contains a ready-to-work spec or ticket, then delegate
+  implementation to /implement. Use when the user pastes a Trello card URL and
+  wants to do the work — phrases like "implement this", "do this card", "work on
+  this", "ship this", or a ready-specced Trello card URL. Do NOT use when the
+  user wants to flesh out/spec/grill a card first; use trello-spec-card instead.
 ---
 
 # Trello Implement Card
 
-Fetch a ready-to-work Trello spec card and implement the described work.
+Thin Trello adapter around `/implement`.
+
+This skill owns only:
+
+- what Trello context to fetch
+- how to hand that context to `/implement`
+- how to update Trello if the user explicitly asks for a Trello update
+
+It must not parse spec sections, synthesize requirements, choose testing seams,
+or maintain its own implementation method. `/implement` owns the implementation
+workflow.
 
 ## Workflow
 
-### 1. Parse the card URL
+### 1. Fetch Trello context
 
-Extract the short link — the segment immediately after `/c/`:
+Parse the short link from `/c/SHORTLINK`.
 
-```
-https://trello.com/c/SHORTLINK/optional-card-name
-                      ^^^^^^^^
-```
+Use the `/trello-cli` skill for command syntax, JSON handling, and Trello error
+rules. Fetch the card fields needed for implementation context:
 
-### 2. Fetch the card
-
-```bash
-trello-cli --get-card <SHORTLINK>
-```
-
-Grab from the JSON response:
-- `data.id` — full card ID
+- `data.id` — full card ID, for any later Trello update
 - `data.name` — card title
-- `data.desc` — description, expected to be the ready-to-work spec from `trello-spec-card`
-- `data.url` — card URL, useful for final reporting
+- `data.desc` — spec/ticket body
+- `data.url` — card URL for reporting
 
-### 3. Parse the spec
+Fetch comments or attachments only when the card description or user request
+indicates they are part of the implementation context. Preserve unreadable
+attachment metadata and note any read failure explicitly.
 
-`trello-spec-card` writes the active implementation spec at the top of the description, and preserves old notes below `---`:
+If the card has no useful description/spec, stop and ask whether to run
+`/trello-spec-card` first or proceed from the title alone.
 
+### 2. Preserve document intent without re-parsing
+
+Do not break down the card into your own requirements model.
+
+If you need to understand the shape of the document before handing it off, read
+`/to-spec` and `/to-tickets` and use their conventions:
+
+- `/to-spec` for spec-shaped card descriptions
+- `/to-tickets` for ticket-shaped card descriptions, especially blocking edges
+
+If the description includes preserved historical notes after a separator such as
+`---` / `## Original notes`, label them as historical context when passing them
+to `/implement`; do not let them override the active spec/ticket text.
+
+### 3. Delegate implementation
+
+Call `/implement` with the fetched Trello context:
+
+```markdown
+Implement this Trello card.
+
+Card: <data.name>
+URL: <data.url>
+ID: <data.id>
+
+Spec/ticket body:
+<data.desc>
+
+Additional Trello context, if fetched:
+<comments, attachments, read failures, or "(none)">
+
+Use the card body as the source of truth. If historical notes are present, treat
+them as background only.
 ```
-<ready-to-work spec>
 
----
+Let `/implement` own repo exploration, TDD, verification, review, commits, and
+final implementation reporting.
 
-## Original notes
+### 4. Update Trello only when requested
 
-<old description>
-```
+Do not move, comment on, or edit the Trello card unless the user asks.
 
-Use **only the content above the first `---` as the source of truth**. Treat the preserved `Original notes` as historical context only; do not let it override the spec.
-
-Extract these sections when present:
-
-- `## What to build` — feature intent and end-to-end behaviour
-- `## Acceptance criteria` — concrete done conditions
-- `## Context & decisions` — scope decisions, constraints, assumptions, rationale
-- `## Out of scope` — explicit exclusions
-- `## Blocked by / dependencies` — prerequisites
-- `## Open questions` — unresolved items
-
-If the description has no `---`, treat the full description as the active spec. If the description is unstructured, still proceed from the title + description, but flag that no structured spec was found.
-
-### 4. Check readiness
-
-Do **not** look for Q&A answer sections; this skill consumes the final spec produced by `trello-spec-card`.
-
-Before coding, check:
-
-- If `## What to build` or acceptance criteria are missing, warn that the spec may be thin, then proceed unless the user asked for strict gating.
-- If `## Blocked by / dependencies` names an unmet blocker, stop and ask whether to proceed anyway.
-- If `## Open questions` exists, decide whether any question blocks implementation:
-  - blocking or scope-changing question → ask before coding
-  - non-blocking question → proceed and note the assumption in the final report
-
-### 5. Synthesise requirements
-
-Before touching code, form a clear internal picture:
-
-- **What**: `What to build` + acceptance criteria define the required behaviour
-- **Boundaries**: `Out of scope` and `Context & decisions` define what not to do
-- **How/constraints**: `Context & decisions`, dependencies, and codebase patterns guide implementation
-
-If the preserved original notes contradict the active spec, prefer the active spec.
-
-### 6. Explore before implementing
-
-Read `CLAUDE.md` at the project root (if it exists) for conventions. Then explore the relevant parts of the codebase to understand:
-- Where the change belongs
-- Existing patterns to follow
-- What not to break
-
-Don't guess at structure — look it up first.
-
-### 7. Implement
-
-Do the work. Follow project conventions. Make the changes.
-
-If an assumption had to be made due to a missing/ambiguous spec item or non-blocking open question, note it — don't silently guess and move on.
-
-### 8. Report
-
-When done, tell the user:
-- What was changed (files + brief description)
-- Any assumptions made where the spec was missing or unclear
-- Any verification run, if applicable
-
-Keep it tight — no padding.
-
-## Error handling
-
-- `--get-card` returns `ok: false` → report the error, stop.
-- Card has no description → implement from the title alone only if the user confirms; flag that there was no spec to work from.
-- Description is only preserved `Original notes` with no active spec → treat it as unspecced and ask whether to proceed or run `trello-spec-card` first.
+If a Trello update is requested after implementation, use the full card ID and
+refer to `/trello-cli` for the appropriate update/comment/move command. Check
+for `ok: false` and report any Trello error.
