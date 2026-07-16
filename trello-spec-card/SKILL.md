@@ -2,126 +2,53 @@
 name: trello-spec-card
 description: >
   Fetch a Trello card, gather its Trello context, run /grill-with-docs to clarify
-  intent, delegate spec writing to /to-spec, then publish the approved spec back
-  to the same Trello card. Use when the user wants to spec, flesh out, or make a
-  Trello card ready for agent implementation. Do not use for implementation; use
-  trello-implement-card instead.
+  intent, delegate spec writing to /to-spec, save and validate the proposed spec,
+  then publish the approved file back to the same card. Use when the user wants
+  to spec, flesh out, or make a Trello card ready for agent implementation. Do
+  not use for implementation; use trello-implement-card instead.
 ---
 
 # Trello Spec Card
 
 Thin Trello adapter around `/grill-with-docs` and `/to-spec`.
 
-This skill owns only:
-
-- what Trello context to fetch
-- how to publish the approved result back to Trello
-
-It must not maintain its own spec template, grilling flow, or card-breakdown
-method. Delegate intent discovery to `/grill-with-docs`, delegate spec writing to
-`/to-spec`, and read `/to-tickets` for the project's ticket/blocking-edge
-document conventions when ticket-shaped output is relevant.
-
 ## Workflow
 
 ### 1. Fetch Trello context
 
-Parse the short link from `/c/SHORTLINK`.
-
-Use the `/trello-cli` skill for command syntax, JSON handling, and Trello error
-rules. Fetch:
+Parse `SHORTLINK` from `/c/SHORTLINK`. Read `/trello-cli` and use it for commands,
+JSON handling, and errors. Fetch:
 
 - Card fields: `data.id`, `data.name`, `data.desc`, `data.url`
 - Comments
-- Attachment list/metadata
+- Attachment metadata and any safely readable local/visible content
 
-For attachments, preserve name, URL, MIME type, size, upload-vs-URL status, and
-any local/visible content you can safely read with available tools. If an
-attachment cannot be read, keep the metadata and note the failure explicitly.
-Do not silently drop attachments.
+Preserve each attachment's name and readable content.
+Explicitly note read failures; never silently drop attachments.
 
 ### 2. Clarify intent with `/grill-with-docs`
 
-Before writing the spec, run `/grill-with-docs` with the fetched Trello context
-so the agent understands the card, the user's intent, project vocabulary, and any
-important decisions.
+Pass the fetched context to `/grill-with-docs` and ask it to clarify intent,
+project vocabulary, and decisions for a pickup-ready spec without updating
+Trello. Let it own the interview, code/docs checks, glossary updates, and
+ADR suggestions.
 
-Pass this context into `/grill-with-docs`:
+### 3. Draft with `/to-spec`
 
-```markdown
-We are turning this Trello card into a pickup-ready spec.
+Pass `/to-spec` all fetched context and the resolved understanding. Tell it to:
 
-Trello card:
-- ID: <data.id>
-- Title: <data.name>
-- URL: <data.url>
+- target this same Trello card
+- return only the proposed pickup-ready markdown spec
+- not update Trello
+- omit `Original notes`; this adapter adds them from the source
 
-Current description:
-<data.desc or "(empty)">
+### 4. Build and validate the canonical file
 
-Comments:
-<comments or "(none)">
-
-Attachments:
-<metadata plus extracted/readable content or explicit read failures; "(none)" if none>
-
-Goal: clarify the user's intent and any project/domain decisions needed before
-writing the spec. Do not update Trello. Return the resolved understanding here
-for `/to-spec`.
-```
-
-Let `/grill-with-docs` own the interview, code/docs checks, glossary updates,
-and ADR suggestions. Do not duplicate its questioning method here.
-
-### 3. Delegate spec writing
-
-Before drafting, read the `/to-spec` skill instructions and the `/to-tickets`
-skill instructions. Use their document shapes and vocabulary instead of defining
-a Trello-specific spec format here.
-
-Pass `/to-spec` the fetched Trello context plus the resolved understanding from
-`/grill-with-docs`, and make the publish target explicit:
+Write the proposed spec to `/tmp/trello-spec-<SHORTLINK>.md`. If the original
+card description is non-empty, append it unchanged at the very bottom as:
 
 ```markdown
-Turn this Trello card context and clarified intent into a pickup-ready spec.
 
-Trello card:
-- ID: <data.id>
-- Title: <data.name>
-- URL: <data.url>
-
-Current description:
-<data.desc or "(empty)">
-
-Comments:
-<comments or "(none)">
-
-Attachments:
-<metadata plus extracted/readable content or explicit read failures; "(none)" if none>
-
-Clarified intent from `/grill-with-docs`:
-<resolved understanding, decisions, terminology, open questions, and any docs/ADR updates>
-
-Publish target: this same Trello card. Return the final markdown spec here for
-Trello publishing; do not update Trello directly.
-```
-
-Let `/to-spec` own synthesis, seams, wording, scope, and approval checks.
-
-### 4. Publish to Trello after approval
-
-Only update Trello after the user has explicitly approved the exact markdown to
-publish.
-
-When publishing:
-
-- Use the full card ID (`data.id`), not the short link.
-- Use `/trello-cli` for the update command.
-- Replace the card description with the approved spec.
-- If the original description was non-empty and is not already preserved in the
-  approved spec, append it under:
-
-```markdown
 ---
 
 ## Original notes
@@ -129,9 +56,47 @@ When publishing:
 <original data.desc exactly>
 ```
 
-Check the Trello command response. If it reports `ok: false`, report the error
-and print the full markdown so the user can paste it manually.
+This is the canonical approval and publication artifact. Never publish a
+reconstructed copy. Count Unicode characters in the complete file, including
+original notes, rather than counting bytes:
 
-### 5. Confirm
+```bash
+SPEC_FILE="/tmp/trello-spec-<SHORTLINK>.md"
+CHAR_COUNT=$(wc -m < "$SPEC_FILE" | tr -d '[:space:]')
+printf '%s\n' "$CHAR_COUNT"
+```
 
-Report the card title, Trello URL, and that the approved spec was written.
+Maximum: **16,384 characters**. If greater, shorten the spec without changing
+the original notes, rewrite the same file, and repeat the check until it fits.
+If unchanged original notes leave no room for a useful spec, explain the
+conflict and ask how to preserve them. Never show an oversized proposal for
+approval.
+
+### 5. Show and approve
+
+After validation, read the canonical file and show its **entire exact contents**
+not only a summary or path—so the user can read it. Ask for explicit approval
+of that exact markdown.
+
+For requested changes, update the same file, check its length again, and show
+the entire file again. Any change invalidates prior approval. Do not alter the
+file after approval.
+
+### 6. Publish the approved file
+
+Use full card ID `data.id`. Use Bash to pass the canonical file contents
+directly to `/trello-cli` without regenerating or manually copying the
+description:
+
+```bash
+SPEC_FILE="/tmp/trello-spec-<SHORTLINK>.md"
+trello-cli --update-card "<data.id>" --desc "$(<"$SPEC_FILE")"
+```
+
+Check the JSON response. If `ok: false`, report the error and show the entire
+canonical file so the user can paste it manually.
+
+### 7. Confirm
+
+Report the card title, Trello URL, canonical file path, and that the approved
+file was written to the card description.
