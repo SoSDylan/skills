@@ -18,6 +18,17 @@ ln -s "$(pwd)/distill-to-docs" ~/.claude/skills/distill-to-docs
 
 Restart Claude Code after installing.
 
+### Pi browser extension
+
+```bash
+cd browser-tools
+npm install
+mkdir -p ~/.pi/agent/extensions
+ln -s "$(pwd)" ~/.pi/agent/extensions/browser-tools
+```
+
+Run `/reload` in Pi. See [`browser-tools/README.md`](browser-tools/README.md) for usage and configuration.
+
 ---
 
 ## Skills
@@ -37,6 +48,14 @@ Fetches an answered Trello card, synthesises requirements from all Q&A sections,
 ### `distill-to-docs`
 
 Scans the current session for non-obvious corrections and patterns, then appends them to `CLAUDE.md` or `AGENTS.md` after your review.
+
+---
+
+## Pi extensions
+
+### `browser-tools`
+
+Drives a visible Google Chrome session from Pi with Playwright, including navigation, interaction, accessibility snapshots, console capture, responsive viewport testing, and screenshots returned to vision-capable models. Browser tools are disabled by default; use `/browser on` and `/browser off` to control them per session.
 
 ---
 
