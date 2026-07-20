@@ -1,8 +1,8 @@
 ---
 name: trello-spec-card
 description: >
-  Fetch a Trello card, gather its Trello context, run /grill-with-docs to clarify
-  intent, delegate spec writing to /to-spec, save and validate the proposed spec,
+  Fetch a Trello card, gather its Trello context, run /skill:grill-with-docs to
+  clarify intent, delegate spec writing to /skill:to-spec, save and validate the proposed spec,
   then publish the approved file back to the same card. Use when the user wants
   to spec, flesh out, or make a Trello card ready for agent implementation. Do
   not use for implementation; use trello-implement-card instead.
@@ -10,7 +10,7 @@ description: >
 
 # Trello Spec Card
 
-Thin Trello adapter around `/grill-with-docs` and `/to-spec`.
+Thin Trello adapter around `/skill:grill-with-docs` and `/skill:to-spec`.
 
 ## Workflow
 
@@ -26,25 +26,63 @@ JSON handling, and errors. Fetch:
 Preserve each attachment's name and readable content.
 Explicitly note read failures; never silently drop attachments.
 
-### 2. Clarify intent with `/grill-with-docs`
+### 2. Clarify intent with `/skill:grill-with-docs`
 
-Pass the fetched context to `/grill-with-docs` and ask it to clarify intent,
-project vocabulary, and decisions for a pickup-ready spec without updating
-Trello. Let it own the interview, code/docs checks, glossary updates, and
-ADR suggestions.
+Delegate to the hidden `/skill:grill-with-docs` skill in standard mode with all
+fetched Trello context plus these instructions:
 
-### 3. Draft with `/to-spec`
+- clarify intent, project vocabulary, implementation decisions, and testing
+  seams for a pickup-ready spec without updating Trello
+- own the interview, code/docs checks, glossary updates, and ADR suggestions
+- get explicit agreement on the testing seams before drafting
+- when the understanding is resolved, delegate exactly once to the hidden
+  `/skill:to-spec` skill for the drafting stage below; do not draft or publish
+  the spec itself
 
-Pass `/to-spec` all fetched context and the resolved understanding. Tell it to:
+Tell `/skill:grill-with-docs` to make that `/skill:to-spec` delegation in `draft-only` mode
+with this context:
 
-- target this same Trello card
-- return only the proposed pickup-ready markdown spec
-- not update Trello
-- omit `Original notes`; this adapter adds them from the source
+  ```text
+  Draft a pickup-ready Markdown spec for the Trello card already established in
+  this conversation. The interview and testing-seam agreement are complete.
+  Synthesize the fetched card context and resolved understanding; do not ask
+  more questions. Return only the proposed spec Markdown. Do not publish,
+  create or update tracker items, or write files. Omit any "Original notes"
+  section because the Trello adapter appends the source description unchanged.
+  ```
+
+After `/skill:to-spec` finishes, resume this adapter with this exact continuation:
+
+  ```text
+  Resume the active trello-spec-card workflow at step 4. The immediately
+  preceding assistant response is the draft-only to-spec result; treat its
+  entire Markdown response as the proposed spec. Build and validate the
+  canonical /tmp/trello-spec-<SHORTLINK>.md file using the Trello card metadata
+  and unchanged original description already in this conversation, then follow
+  steps 5-7. Do not invoke grill-with-docs or to-spec again. Trello publication
+  remains owned by trello-spec-card and still requires explicit approval of the
+  exact canonical file.
+  ```
+
+If either hidden skill is unavailable, stop and relay the installation error.
+After the `grill-with-docs` invocation queues, end this turn so its interview can
+proceed.
+
+### 3. Draft-only handoff and continuation
+
+The final grilling turn queues `/skill:to-spec`. `draft-only` mode allows only
+read-only tools during that hidden-skill run, so `/skill:to-spec` cannot publish to another
+tracker or mutate files. When that run ends, the bridge queues the exact
+continuation above, which returns control to this adapter at step 4.
+
+Do not continue to step 4 before receiving that continuation. If the preceding
+`/skill:to-spec` response is not a proposed Markdown spec, stop and explain that drafting failed
+instead of treating prose, a question, or an error as the canonical draft.
 
 ### 4. Build and validate the canonical file
 
-Write the proposed spec to `/tmp/trello-spec-<SHORTLINK>.md`. If the original
+Write the proposed spec from the immediately preceding `/skill:to-spec` response to
+`/tmp/trello-spec-<SHORTLINK>.md`. If the original
 card description is non-empty, append it unchanged at the very bottom as:
 
 ```markdown

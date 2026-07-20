@@ -1,0 +1,28 @@
+{
+  "name": "pi-hidden-skill-invoker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Universal Pi bridge for model-invoked hidden skills",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/hidden-skill-invoker.test.mjs"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.7",
+    "@earendil-works/pi-coding-agent": "0.80.7",
+    "@types/node": "24.10.1",
+    "typebox": "1.1.38",
+    "typescript": "5.9.3"
+  }
+}

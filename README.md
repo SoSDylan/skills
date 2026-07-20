@@ -23,9 +23,28 @@ done
 
 Pi discovers `~/.agents/skills/` directly. To install the same skills for Claude Code, repeat the loop with `~/.claude/skills/` as the destination, then restart Claude Code.
 
-## Install the Pi browser extension
+## Install Pi extensions
 
-Run these commands from the repository root:
+Run the relevant commands from the repository root.
+
+### Hidden skill invoker
+
+This extension is required by `trello-implement-card` and `trello-spec-card`:
+
+```bash
+npm install --prefix extensions/hidden-skill-invoker
+mkdir -p ~/.pi/agent/extensions
+ln -s "$(pwd)/extensions/hidden-skill-invoker" ~/.pi/agent/extensions/hidden-skill-invoker
+```
+
+Install each external skill an adapter delegates to in a Pi skill location such
+as `~/.agents/skills/`. It must retain `disable-model-invocation: true`. Ensure
+Pi's **Skill commands** setting is enabled. See
+[`extensions/hidden-skill-invoker/README.md`](extensions/hidden-skill-invoker/README.md)
+for exact `/skill:<name>` delegation, hidden-skill verification, draft-only
+policy, and continuation behavior.
+
+### Browser tools
 
 ```bash
 npm install --prefix extensions/browser-tools
@@ -33,7 +52,9 @@ mkdir -p ~/.pi/agent/extensions
 ln -s "$(pwd)/extensions/browser-tools" ~/.pi/agent/extensions/browser-tools
 ```
 
-Run `/reload` in Pi after installing or updating it. See [`extensions/browser-tools/README.md`](extensions/browser-tools/README.md) for usage and configuration.
+Run `/reload` in Pi after installing or updating an extension. See
+[`extensions/browser-tools/README.md`](extensions/browser-tools/README.md) for
+browser usage and configuration.
 
 ## Skills
 
@@ -58,6 +79,14 @@ Fetches and clarifies a Trello card, drafts a spec, and publishes the approved r
 Investigates a Zendesk ticket against the current repository, drafts a customer response, and can prepare an approved Trello card.
 
 ## Pi extensions
+
+### `hidden-skill-invoker`
+
+Exposes `invoke_hidden_skill`, a universal bridge for installed hidden skills
+that are directly referenced as `/skill:<name>` by another installed skill. It
+checks delegation, command provenance, and target frontmatter; draft-only mode
+blocks side effects and can queue an explicit adapter continuation after
+drafting.
 
 ### `browser-tools`
 
