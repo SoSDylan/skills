@@ -1,62 +1,50 @@
 ---
 name: trello-implement-card
 description: >
-  Fetch a Trello card that contains a ready-to-work spec or ticket, then delegate
-  implementation to /skill:implement. Use when the user pastes a Trello card URL and
-  wants to do the work — phrases like "implement this", "do this card", "work on
-  this", "ship this", or a ready-specced Trello card URL. Do NOT use when the
-  user wants to flesh out/spec/grill a card first; use trello-spec-card instead.
+  Implement a ready-specced Trello card by handing its context to
+  /skill:implement. Use when the user asks to implement a Trello card; route
+  requests to clarify or flesh out the card to trello-spec-card.
 ---
 
 # Trello Implement Card
 
-Thin Trello adapter around `/skill:implement`.
+Pass Trello context through to `/skill:implement` while leaving implementation
+method and Trello writes with their respective owners.
 
-This skill owns only:
+## 1. Fetch Trello context
 
-- what Trello context to fetch
-- how to hand that context to `/skill:implement`
-- how to update Trello if the user explicitly asks for a Trello update
+Parse the short link from `/c/SHORTLINK`. Use `/trello-cli` for command syntax,
+JSON handling, and Trello error rules. Fetch:
 
-It must not parse spec sections, synthesize requirements, choose testing seams,
-or maintain its own implementation method. `/skill:implement` owns the implementation
-workflow.
-
-## Workflow
-
-### 1. Fetch Trello context
-
-Parse the short link from `/c/SHORTLINK`.
-
-Use the `/trello-cli` skill for command syntax, JSON handling, and Trello error
-rules. Fetch the card fields needed for implementation context:
-
-- `data.id` — full card ID, for any later Trello update
+- `data.id` — full card ID for any later Trello update
 - `data.name` — card title
-- `data.desc` — spec/ticket body
+- `data.desc` — active spec or ticket body
 - `data.url` — card URL for reporting
 
-Fetch comments or attachments only when the card description or user request
-indicates they are part of the implementation context. Preserve unreadable
-attachment metadata and note any read failure explicitly.
+Fetch comments or attachments when the card description or user request makes
+them part of the implementation context. Represent each requested source as
+readable content, preserved metadata plus an explicit read failure, or
+`(none)`.
 
-If the card has no useful description/spec, stop and ask whether to run
-`/trello-spec-card` first or proceed from the title alone.
+If the card has no useful description, ask whether to use
+`trello-spec-card` first or proceed from the title alone.
 
-### 2. Preserve document intent without re-parsing
+This step is complete when all four card fields and every requested additional
+source are accounted for.
 
-Do not break down the card into your own requirements model. Do not invoke
-`to-spec` or `to-tickets` merely to classify the description; those are active
-workflows that may publish their output.
+## 2. Prepare a verbatim handoff
 
-If the description includes preserved historical notes after a separator such as
-`---` / `## Original notes`, label them as historical context when passing them
-to `implement`; do not let them override the active spec/ticket text.
+Pass the active card body verbatim as the implementation source of truth.
+Preserve its document shape instead of constructing a second requirements
+model. Classification and spec rewriting remain outside this adapter.
 
-### 3. Delegate implementation
+When the description contains historical notes after a separator such as
+`---` / `## Original notes`, label that block as background while keeping the
+active spec or ticket authoritative.
 
-Delegate to the hidden `/skill:implement` skill in standard mode with the following
-multiline context:
+## 3. Delegate implementation
+
+Delegate to `/skill:implement` with this multiline context:
 
 ```markdown
 Implement this Trello card.
@@ -66,24 +54,23 @@ URL: <data.url>
 ID: <data.id>
 
 Spec/ticket body:
-<data.desc>
+<data.desc verbatim>
 
 Additional Trello context, if fetched:
 <comments, attachments, read failures, or "(none)">
 
-Use the card body as the source of truth. If historical notes are present, treat
-them as background only.
+Use the card body as the source of truth. Treat labelled historical notes as
+background only.
 ```
 
-If the tool reports that `/skill:implement` is unavailable, stop and relay its
+If the tool reports that `/skill:implement` is unavailable, relay its
 installation error. After it queues successfully, end this turn. The hidden
-`implement` skill owns repo exploration, TDD, verification, review, commits, and
-final implementation reporting.
+skill owns repository exploration, TDD, verification, review, commits, and its
+final implementation report.
 
-### 4. Update Trello only when requested
+## 4. Keep Trello read-only by default
 
-Do not move, comment on, or edit the Trello card unless the user asks.
-
-If a Trello update is requested after implementation, use the full card ID and
-refer to `/trello-cli` for the appropriate update/comment/move command. Check
-for `ok: false` and report any Trello error.
+A completed implementation leaves Trello unchanged. When the user explicitly
+requests a move, comment, or description edit, use the full card ID and
+`/trello-cli` for that operation. Check its JSON response and report any
+`ok: false` error.
