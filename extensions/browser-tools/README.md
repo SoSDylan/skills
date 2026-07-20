@@ -4,11 +4,12 @@ A [Pi](https://github.com/badlogic/pi-mono) extension that drives a visible, per
 
 ## Install
 
+Run these commands from the repository root:
+
 ```bash
-cd browser-tools
-npm install
+npm install --prefix extensions/browser-tools
 mkdir -p ~/.pi/agent/extensions
-ln -s "$(pwd)" ~/.pi/agent/extensions/browser-tools
+ln -s "$(pwd)/extensions/browser-tools" ~/.pi/agent/extensions/browser-tools
 ```
 
 Run `/reload` in Pi after installing or updating the extension. The symlink makes the git-tracked source in this repository the loaded extension.
