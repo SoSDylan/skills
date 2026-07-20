@@ -22,15 +22,14 @@ Install each external skill an adapter delegates to in a Pi skill location such 
 
 - `skill` — an installed hidden skill name directly referenced as `/skill:<name>` by another installed skill
 - `input` — multiline context appended to the skill
-- `mode` — `standard` (default) or `draft-only`
-- `continuation` — optional follow-up after a `draft-only` run
+- `continuation` — optional follow-up queued after a drafting skill finishes
 
-`draft-only` permits only `read`, `grep`, `find`, and `ls` while the hidden skill runs. All other tool calls—including shell commands, file mutation, tracker tools, and recursive hidden-skill invocation—are blocked. This lets an adapter retain publication ownership even when a drafting skill normally publishes.
+A delegation with no continuation uses the active toolset unchanged. Supplying a continuation permits only `read`, `grep`, `find`, and `ls` during the delegated run. All other tool calls—including shell commands, file mutation, tracker tools, and recursive hidden-skill invocation—are blocked. This lets an adapter retain publication ownership before control returns to it.
 
-A continuation is queued from `agent_end`, after the draft-only run completes. This supports explicit multi-stage flows such as:
+The continuation is queued from `agent_end`. This supports explicit multi-stage flows such as:
 
 ```text
-/skill:grill-with-docs → /skill:to-spec (draft-only) → adapter validation and approval
+/skill:grill-with-docs → /skill:to-spec → adapter validation and approval
 ```
 
 The grilling invocation tells the model when and how to invoke `/skill:to-spec`; that invocation supplies the continuation that resumes the adapter.

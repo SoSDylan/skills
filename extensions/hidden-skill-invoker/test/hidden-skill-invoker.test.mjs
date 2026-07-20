@@ -179,14 +179,15 @@ test("expands the verified queued slash command for extension-originated input",
   assert.doesNotMatch(transformed.text, /disable-model-invocation/);
 });
 
-test("draft-only invocation blocks side-effecting tools, then queues its continuation", async () => {
+test("a continuation makes the delegated run read-only, then returns control", async () => {
   const path = await skillFile("to-spec");
   const adapterPath = await skillFile("adapter", "# Adapter\n\nDelegate to `/skill:to-spec`.");
   const app = harness([command("to-spec", path), command("adapter", adapterPath)]);
+  assert.equal("mode" in app.tool.parameters.properties, false);
+
   await execute(app.tool, {
     skill: "to-spec",
     input: "Return markdown only.",
-    mode: "draft-only",
     continuation: "Resume the Trello adapter at canonical-file validation.",
   });
   await app.emit("input", {
@@ -200,11 +201,11 @@ test("draft-only invocation blocks side-effecting tools, then queues its continu
   assert.deepEqual(await app.emit("tool_call", { toolName: "read" }), undefined);
   assert.deepEqual(await app.emit("tool_call", { toolName: "bash" }), {
     block: true,
-    reason: "Hidden skill to-spec is running in draft-only mode; side-effecting tool bash is blocked.",
+    reason: "Hidden skill to-spec has a continuation; side-effecting tool bash is blocked.",
   });
   assert.deepEqual(await app.emit("tool_call", { toolName: "invoke_hidden_skill" }), {
     block: true,
-    reason: "Hidden skill to-spec is running in draft-only mode; side-effecting tool invoke_hidden_skill is blocked.",
+    reason: "Hidden skill to-spec has a continuation; side-effecting tool invoke_hidden_skill is blocked.",
   });
 
   await app.emit("agent_end", {});

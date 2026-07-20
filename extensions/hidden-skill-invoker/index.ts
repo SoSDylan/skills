@@ -1,26 +1,17 @@
 import { readFile, realpath } from "node:fs/promises";
 import { dirname } from "node:path";
-import { StringEnum } from "@earendil-works/pi-ai";
 import { parseFrontmatter, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-const INVOCATION_MODES = ["standard", "draft-only"] as const;
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const VALID_SKILL_NAME = /^(?!-)(?!.*--)[a-z0-9-]{1,64}(?<!-)$/;
 
-type InvocationMode = (typeof INVOCATION_MODES)[number];
-
 type Invocation = {
   skill: string;
-  mode: InvocationMode;
   commandText: string;
   expandedText: string;
   continuation?: string;
 };
-
-function isInvocationMode(value: string): value is InvocationMode {
-  return (INVOCATION_MODES as readonly string[]).includes(value);
-}
 
 async function hasDirectDelegation(pi: ExtensionAPI, targetName: string, targetPath: string): Promise<boolean> {
   const targetCommandName = `skill:${targetName}`;
@@ -57,12 +48,12 @@ export default function hiddenSkillInvoker(pi: ExtensionAPI) {
     label: "Invoke Hidden Skill",
     description:
       "Bridge delegation to any installed hidden skill that another installed SKILL.md directly references as /skill:<name>. " +
-      "Use draft-only mode to prevent a drafting skill from publishing or mutating state, and optionally resume with a continuation.",
+      "An optional continuation returns control to the delegating workflow after a read-only drafting run.",
     promptSnippet: "Delegate an exact /skill:<name> reference to an installed hidden skill",
     promptGuidelines: [
       "When an active workflow directly delegates with /skill:<name>, use invoke_hidden_skill as the bridge; the workflow does not need to name the tool.",
-      "Do not use invoke_hidden_skill for shorthand /name references or hidden skills not directly referenced as /skill:<name> by another installed SKILL.md.",
-      "Use invoke_hidden_skill draft-only mode when an active workflow must retain publication ownership.",
+      "Use invoke_hidden_skill only for exact /skill:<name> references made by another installed SKILL.md.",
+      "Supply invoke_hidden_skill continuation only when a drafting workflow must remain read-only and then return control to its adapter.",
     ],
     parameters: Type.Object({
       skill: Type.String({
@@ -72,14 +63,10 @@ export default function hiddenSkillInvoker(pi: ExtensionAPI) {
       input: Type.String({
         description: "Context and instructions appended to the hidden skill. Multiline text is supported.",
       }),
-      mode: Type.Optional(
-        StringEnum(INVOCATION_MODES, {
-          description: "standard (default), or draft-only to block every tool except read, grep, find, and ls.",
-        }),
-      ),
       continuation: Type.Optional(
         Type.String({
-          description: "Follow-up user message queued after the hidden skill finishes. Intended for draft-only adapter workflows.",
+          minLength: 1,
+          description: "Follow-up user message queued after a read-only drafting skill finishes.",
         }),
       ),
     }),
@@ -88,14 +75,6 @@ export default function hiddenSkillInvoker(pi: ExtensionAPI) {
         throw new Error(
           `Invalid skill name "${String(params.skill)}". Use 1-64 lowercase letters, numbers, or single hyphens.`,
         );
-      }
-
-      const mode = params.mode ?? "standard";
-      if (!isInvocationMode(mode)) {
-        throw new Error(`Unknown hidden-skill invocation mode: ${String(mode)}.`);
-      }
-      if (params.continuation !== undefined && mode !== "draft-only") {
-        throw new Error("A hidden-skill continuation requires draft-only mode.");
       }
 
       const commandName = `skill:${params.skill}`;
@@ -146,7 +125,6 @@ export default function hiddenSkillInvoker(pi: ExtensionAPI) {
       const expandedText = params.input ? `${skillBlock}\n\n${params.input}` : skillBlock;
       const invocation: Invocation = {
         skill: params.skill,
-        mode,
         commandText,
         expandedText,
         continuation: params.continuation,
@@ -159,7 +137,7 @@ export default function hiddenSkillInvoker(pi: ExtensionAPI) {
 
       return {
         content: [{ type: "text", text: `Queued hidden skill: ${params.skill}.` }],
-        details: { skill: params.skill, mode },
+        details: { skill: params.skill },
       };
     },
   });
@@ -181,12 +159,12 @@ export default function hiddenSkillInvoker(pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", (event) => {
-    if (activeInvocation?.mode !== "draft-only" || READ_ONLY_TOOLS.has(event.toolName)) return;
+    if (activeInvocation?.continuation === undefined || READ_ONLY_TOOLS.has(event.toolName)) return;
 
     return {
       block: true,
       reason:
-        `Hidden skill ${activeInvocation.skill} is running in draft-only mode; ` +
+        `Hidden skill ${activeInvocation.skill} has a continuation; ` +
         `side-effecting tool ${event.toolName} is blocked.`,
     };
   });
