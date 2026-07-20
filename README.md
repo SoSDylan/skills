@@ -41,8 +41,8 @@ Install each external skill an adapter delegates to in a Pi skill location such
 as `~/.agents/skills/`. It must retain `disable-model-invocation: true`. Ensure
 Pi's **Skill commands** setting is enabled. See
 [`extensions/hidden-skill-invoker/README.md`](extensions/hidden-skill-invoker/README.md)
-for exact `/skill:<name>` delegation, hidden-skill verification, draft-only
-policy, and continuation behavior.
+for exact `/skill:<name>` delegation, hidden-skill verification, read-only
+continuations, and handoff behavior.
 
 ### Browser tools
 
@@ -84,8 +84,8 @@ Investigates a Zendesk ticket against the current repository, drafts a customer 
 
 Exposes `invoke_hidden_skill`, a universal bridge for installed hidden skills
 that are directly referenced as `/skill:<name>` by another installed skill. It
-checks delegation, command provenance, and target frontmatter; draft-only mode
-blocks side effects and can queue an explicit adapter continuation after
+checks delegation, command provenance, and target frontmatter; delegations
+with a continuation stay read-only and return control to the adapter after
 drafting.
 
 ### `browser-tools`

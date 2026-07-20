@@ -169,7 +169,7 @@ export default function hiddenSkillInvoker(pi: ExtensionAPI) {
     };
   });
 
-  pi.on("agent_end", () => {
+  pi.on("agent_settled", () => {
     const completed = activeInvocation;
     activeInvocation = undefined;
     if (completed?.continuation) {

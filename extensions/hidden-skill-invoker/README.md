@@ -26,7 +26,7 @@ Install each external skill an adapter delegates to in a Pi skill location such 
 
 A delegation with no continuation uses the active toolset unchanged. Supplying a continuation permits only `read`, `grep`, `find`, and `ls` during the delegated run. All other tool calls—including shell commands, file mutation, tracker tools, and recursive hidden-skill invocation—are blocked. This lets an adapter retain publication ownership before control returns to it.
 
-The continuation is queued from `agent_end`. This supports explicit multi-stage flows such as:
+The continuation is queued from `agent_settled`, after retries, compaction recovery, and queued work finish. This supports explicit multi-stage flows such as:
 
 ```text
 /skill:grill-with-docs → /skill:to-spec → adapter validation and approval

@@ -209,7 +209,9 @@ test("a continuation makes the delegated run read-only, then returns control", a
   });
 
   await app.emit("agent_end", {});
+  assert.equal(app.sent.length, 1);
 
+  await app.emit("agent_settled", {});
   assert.deepEqual(app.sent.at(-1), {
     text: "Resume the Trello adapter at canonical-file validation.",
     options: { deliverAs: "followUp" },
