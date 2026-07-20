@@ -60,7 +60,7 @@ browser usage and configuration.
 
 ### `distill-to-docs`
 
-Scans the current session for non-obvious corrections and patterns, then appends them to `CLAUDE.md` or `AGENTS.md` after your review.
+Distills non-derivable session lessons into the appropriate project agent docs after your review.
 
 ### `draft-commits`
 
