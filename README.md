@@ -49,9 +49,17 @@ Distills non-derivable session lessons into the appropriate project agent docs a
 
 Groups uncommitted changes and drafts commit titles that match the repository's existing style.
 
+### `keychain-env`
+
+Stores, checks, and removes macOS Keychain credentials and supplies them to commands as environment variables without revealing their values.
+
 ### `trello-card-context`
 
 Automatically fetches and reads a pasted Trello card URL, including its description, comments, checklists, custom fields, and attachments, before continuing with the requested task.
+
+### `linear-cli`
+
+Reads and manages Linear issues, comments, labels, workflow states, projects, and relations through Linear's GraphQL API.
 
 ### `zendesk-triage-ticket`
 
