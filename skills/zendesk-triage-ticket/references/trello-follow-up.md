@@ -1,7 +1,8 @@
 # Trello Product Follow-Up
 
 Use this branch only after the user chooses product follow-up for the assessed
-Zendesk ticket. Capture problem framing; `trello-spec-card` owns specification.
+Zendesk ticket. Capture problem framing rather than a full implementation spec;
+a later workflow can load the resulting card through `trello-card-context`.
 
 ## 1. Prepare the card
 

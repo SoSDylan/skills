@@ -27,23 +27,6 @@ Pi discovers `~/.agents/skills/` directly. To install the same skills for Claude
 
 Run the relevant commands from the repository root.
 
-### Hidden skill invoker
-
-This extension is required by `trello-implement-card` and `trello-spec-card`:
-
-```bash
-npm install --prefix extensions/hidden-skill-invoker
-mkdir -p ~/.pi/agent/extensions
-ln -s "$(pwd)/extensions/hidden-skill-invoker" ~/.pi/agent/extensions/hidden-skill-invoker
-```
-
-Install each external skill an adapter delegates to in a Pi skill location such
-as `~/.agents/skills/`. It must retain `disable-model-invocation: true`. Ensure
-Pi's **Skill commands** setting is enabled. See
-[`extensions/hidden-skill-invoker/README.md`](extensions/hidden-skill-invoker/README.md)
-for exact `/skill:<name>` delegation, hidden-skill verification, read-only
-continuations, and handoff behavior.
-
 ### Browser tools
 
 ```bash
@@ -66,27 +49,15 @@ Distills non-derivable session lessons into the appropriate project agent docs a
 
 Groups uncommitted changes and drafts commit titles that match the repository's existing style.
 
-### `trello-implement-card`
+### `trello-card-context`
 
-Fetches a ready-to-work Trello card and delegates its implementation workflow.
-
-### `trello-spec-card`
-
-Fetches and clarifies a Trello card, drafts a spec, and publishes the approved result back to the card.
+Automatically fetches and reads a pasted Trello card URL, including its description, comments, checklists, custom fields, and attachments, before continuing with the requested task.
 
 ### `zendesk-triage-ticket`
 
 Investigates a Zendesk ticket against the current repository, drafts a customer response, and can prepare an approved Trello card.
 
 ## Pi extensions
-
-### `hidden-skill-invoker`
-
-Exposes `invoke_hidden_skill`, a universal bridge for installed hidden skills
-that are directly referenced as `/skill:<name>` by another installed skill. It
-checks delegation, command provenance, and target frontmatter; delegations
-with a continuation stay read-only and return control to the adapter after
-drafting.
 
 ### `browser-tools`
 
