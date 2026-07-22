@@ -55,7 +55,7 @@ Automatically fetches and reads a pasted Trello card URL, including its descript
 
 ### `zendesk-triage-ticket`
 
-Investigates a Zendesk ticket against the current repository, drafts a customer response, and can prepare an approved Trello card.
+Investigates a Zendesk ticket through read-only evidence gathering and produces a sourced resolution brief covering the user's problem, cause, supported fixes, and missing evidence.
 
 ## Pi extensions
 

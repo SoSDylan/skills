@@ -1,14 +1,25 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, readFile, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 const CONFIG_PATH = ".agents/zendesk.local.json";
-const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const MAX_NON_MEDIA_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const API_TIMEOUT_MS = 30_000;
 const ATTACHMENT_TIMEOUT_MS = 120_000;
+const IMAGE_EXTENSIONS = new Set([
+  ".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg",
+  ".jpg", ".png", ".svg", ".tif", ".tiff", ".webp",
+]);
+const VIDEO_EXTENSIONS = new Set([
+  ".3g2", ".3gp", ".avi", ".m2ts", ".m4v", ".mkv", ".mov",
+  ".mp4", ".mpeg", ".mpg", ".mts", ".ogv", ".ts", ".webm",
+]);
 
 function output(value, exitCode = 0) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -101,6 +112,17 @@ function safeAttachmentName(attachment) {
   return `${attachment.id}-${safe || "attachment"}`;
 }
 
+function attachmentMediaKind(attachment) {
+  const contentType = String(attachment.content_type ?? "").split(";", 1)[0].trim().toLowerCase();
+  if (contentType.startsWith("image/")) return "image";
+  if (contentType.startsWith("video/")) return "video";
+
+  const extension = path.extname(attachment.file_name ?? "").toLowerCase();
+  if (IMAGE_EXTENSIONS.has(extension)) return "image";
+  if (VIDEO_EXTENSIONS.has(extension)) return "video";
+  return null;
+}
+
 function zendeskAttachmentUrl(value, subdomain) {
   let url;
   try {
@@ -115,9 +137,10 @@ function zendeskAttachmentUrl(value, subdomain) {
 }
 
 async function downloadAttachment(attachment, directory, config, authorization) {
+  const mediaKind = attachmentMediaKind(attachment);
   const size = Number(attachment.size);
-  if (Number.isFinite(size) && size > MAX_ATTACHMENT_BYTES) {
-    return { status: "skipped", reason: "attachment exceeds 50 MB limit" };
+  if (!mediaKind && Number.isFinite(size) && size > MAX_NON_MEDIA_ATTACHMENT_BYTES) {
+    return { status: "skipped", reason: "non-media attachment exceeds 50 MB limit" };
   }
 
   const url = zendeskAttachmentUrl(attachment.content_url, config.subdomain);
@@ -131,19 +154,35 @@ async function downloadAttachment(attachment, directory, config, authorization) 
   if (!response.ok) {
     return { status: "failed", reason: `HTTP ${response.status}` };
   }
-
-  const chunks = [];
-  let bytes = 0;
-  for await (const chunk of response.body) {
-    bytes += chunk.byteLength;
-    if (bytes > MAX_ATTACHMENT_BYTES) {
-      return { status: "skipped", reason: "download exceeds 50 MB limit" };
-    }
-    chunks.push(Buffer.from(chunk));
-  }
+  if (!response.body) return { status: "failed", reason: "empty response body" };
 
   const localPath = path.join(directory, safeAttachmentName(attachment));
-  await writeFile(localPath, Buffer.concat(chunks, bytes), { mode: 0o600 });
+  let bytes = 0;
+  let exceededLimit = false;
+  const limiter = new Transform({
+    transform(chunk, _encoding, callback) {
+      bytes += chunk.byteLength;
+      if (!mediaKind && bytes > MAX_NON_MEDIA_ATTACHMENT_BYTES) {
+        exceededLimit = true;
+        callback(new Error("download exceeds 50 MB limit"));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+
+  try {
+    await pipeline(
+      Readable.fromWeb(response.body),
+      limiter,
+      createWriteStream(localPath, { flags: "wx", mode: 0o600 }),
+    );
+  } catch (error) {
+    await unlink(localPath).catch(() => {});
+    if (exceededLimit) return { status: "skipped", reason: "non-media download exceeds 50 MB limit" };
+    throw error;
+  }
+
   return { status: "downloaded", localPath, bytes };
 }
 
@@ -204,6 +243,7 @@ async function main() {
         id: attachment.id,
         fileName: attachment.file_name,
         contentType: attachment.content_type,
+        mediaKind: attachmentMediaKind(attachment),
         size: attachment.size,
         contentUrl: attachment.content_url,
         download,
