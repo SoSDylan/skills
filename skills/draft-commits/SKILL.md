@@ -1,7 +1,6 @@
 ---
 name: draft-commits
-description: Draft an approval-gated commit plan that matches the repository's history.
-disable-model-invocation: true
+description: Draft an approval-gated commit plan that matches the repository's history. Always use before creating a Git commit, including when another skill says to commit or completed work warrants committing.
 ---
 
 # Draft Commits
