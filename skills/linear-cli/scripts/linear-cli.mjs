@@ -18,21 +18,37 @@ const SUMMARY_FIELDS = `
   assignee { id name email }
 `;
 
-const HELP = `linear-cli — Linear issue operations through the GraphQL API
+const PROJECT_SUMMARY_FIELDS = `
+  id name slugId url description priority priorityLabel progress scope health
+  startDate targetDate createdAt updatedAt completedAt canceledAt archivedAt
+  status { id name type color }
+  lead { id name email }
+  teams(first: 10) { nodes { id key name } }
+`;
+
+const HELP = `linear-cli — Linear issue and project operations through the GraphQL API
 
 Authentication: set LINEAR_API_KEY.
 
-Read commands:
+Shared read commands:
   auth
   teams
   states --team <key|name|uuid>
   labels [--team <key|name|uuid>] [--group <name>]
-  projects [--team <key|name|uuid>]
+
+Issue read commands:
   list --team <key|name|uuid> [--all] [--limit <1-250>]
   search <text> [--team <key|name|uuid>] [--all] [--limit <1-250>]
   get <identifier|uuid|Linear issue URL>
 
-Write commands (run only for an explicit user request):
+Project read commands:
+  projects [--team <key|name|uuid>] [--all] [--limit <1-250>]
+  project-statuses
+  project-labels [--group <name>]
+  project-search <text> [--team <key|name|uuid>] [--all] [--limit <1-250>]
+  project-get <name|slug|uuid|Linear project URL> [--team <team>]
+
+Issue write commands (run only for an explicit user request):
   create --team <team> --title <title> [--description <md>|--description-file <path>]
          [--project <name|uuid>] [--state <name|uuid>] [--assignee <me|name|email|uuid>]
          [--labels <name,...>] [--priority <0-4>] [--due <YYYY-MM-DD>] [--parent <issue>]
@@ -45,7 +61,25 @@ Write commands (run only for an explicit user request):
   cancel <issue> [--state <canceled-state>]
   relate <issue> --to <issue> --type <blocks|related|duplicate|similar>
 
-Use the literal value "none" to clear project, assignee, due date, or parent on update.
+Project write commands (run only for an explicit user request):
+  project-create --team <team> --name <name> [--teams <team,...>]
+         [--description <md>|--description-file <path>] [--content <md>|--content-file <path>]
+         [--status <name|uuid>] [--lead <me|name|email|uuid>] [--members <user,...>]
+         [--labels <name,...>] [--priority <0-4>] [--start <YYYY-MM-DD>] [--target <YYYY-MM-DD>]
+         [--icon <value>] [--color <hex>]
+  project-update <project> [the same optional fields as project-create] [--team <disambiguating-team>]
+  project-comment <project> (--body <md>|--body-file <path>)
+  project-add-label <project> --label <name|uuid>
+  project-remove-label <project> --label <name|uuid>
+  project-triage <project> --label <child-label> [--group <label-group>]
+  project-complete <project> [--status <completed-status>]
+  project-cancel <project> [--status <canceled-status>]
+  project-relate <project> --to <project> --type <blocks|related>
+  project-archive <project>
+  project-unarchive <project>
+  project-delete <project>  (moves it to Linear's recoverable trash)
+
+On update, use "none" to clear issue project/assignee/due/parent or project lead/members/labels/start/target/icon/color.
 All output is JSON: {"ok":true,"data":...} or {"ok":false,...}.`;
 
 class CliError extends Error {
@@ -84,6 +118,27 @@ export function parseIssueReference(value) {
   const match = url.pathname.match(/^\/[^/]+\/issue\/([A-Za-z][A-Za-z0-9]*-\d+)(?:\/|$)/);
   if (!match) throw new CliError("USAGE_ERROR", "Linear URL must contain /<workspace>/issue/<identifier>.");
   return match[1].toUpperCase();
+}
+
+export function parseProjectReference(value) {
+  const input = String(value ?? "").trim();
+  if (!input) throw new CliError("USAGE_ERROR", "A project name, slug, UUID, or Linear project URL is required.");
+  if (!input.includes("://")) return input;
+
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new CliError("USAGE_ERROR", "Invalid Linear project URL.");
+  }
+  if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "linear.app") {
+    throw new CliError("USAGE_ERROR", "Expected an HTTPS linear.app project URL.");
+  }
+  const match = url.pathname.match(/^\/[^/]+\/project\/([^/]+)(?:\/|$)/);
+  if (!match) throw new CliError("USAGE_ERROR", "Linear URL must contain /<workspace>/project/<project-slug>.");
+  const slug = decodeURIComponent(match[1]);
+  const slugId = slug.match(/-([A-Za-z0-9]+)$/)?.[1];
+  return slugId || slug;
 }
 
 export function parseArguments(argv) {
@@ -152,13 +207,26 @@ function priorityOption(value) {
   return priority;
 }
 
-function dueDateOption(value) {
+function dateOption(value, optionName) {
   if (value === undefined) return undefined;
   if (value.toLowerCase() === "none") return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
-    throw new CliError("USAGE_ERROR", "--due must be YYYY-MM-DD or none.");
+    throw new CliError("USAGE_ERROR", `--${optionName} must be YYYY-MM-DD or none.`);
   }
   return value;
+}
+
+function dueDateOption(value) {
+  return dateOption(value, "due");
+}
+
+function commaSeparated(value, optionName) {
+  const references = String(value).split(",").map((item) => item.trim()).filter(Boolean);
+  if (references.length === 0) throw new CliError("USAGE_ERROR", `--${optionName} must contain at least one value.`);
+  if (references.some((item) => item.toLowerCase() === "none") && references.length > 1) {
+    throw new CliError("USAGE_ERROR", `Use none by itself for --${optionName}.`);
+  }
+  return references;
 }
 
 function connectionFilter(teamId, includeClosed) {
@@ -297,35 +365,108 @@ export class LinearClient {
     return exactOne(matches, "Issue label", reference);
   }
 
-  async projects(teamReference) {
+  async projects(teamReference, { includeArchived = false, limit = 50 } = {}) {
     const team = teamReference ? await this.resolveTeam(teamReference) : null;
     const data = await this.graphql(
-      `query Projects($filter: ProjectFilter) {
-        projects(first: 250, filter: $filter) {
-          nodes { id name slugId url status { id name type } teams(first: 10) { nodes { id key name } } }
+      `query Projects($first: Int!, $filter: ProjectFilter, $includeArchived: Boolean!) {
+        projects(first: $first, filter: $filter, includeArchived: $includeArchived, orderBy: updatedAt) {
+          nodes { ${PROJECT_SUMMARY_FIELDS} }
+          pageInfo { hasNextPage endCursor }
         }
       }`,
-      { filter: team ? { accessibleTeams: { some: { id: { eq: team.id } } } } : null },
+      {
+        first: limit,
+        filter: team ? { accessibleTeams: { some: { id: { eq: team.id } } } } : null,
+        includeArchived,
+      },
     );
-    const projects = data.projects.nodes;
-    return { team, projects };
+    return { team, projects: data.projects.nodes, pageInfo: data.projects.pageInfo };
+  }
+
+  async projectSearch(term, teamReference, { includeArchived = false, limit = 50 } = {}) {
+    const team = teamReference ? await this.resolveTeam(teamReference) : null;
+    const data = await this.graphql(
+      `query SearchProjects($term: String!, $first: Int!, $teamId: String, $includeArchived: Boolean!) {
+        searchProjects(term: $term, first: $first, teamId: $teamId, includeArchived: $includeArchived) {
+          nodes { ${PROJECT_SUMMARY_FIELDS} }
+          totalCount
+          pageInfo { hasNextPage endCursor }
+        }
+      }`,
+      { term, first: limit, teamId: team?.id ?? null, includeArchived },
+    );
+    return {
+      team,
+      projects: data.searchProjects.nodes,
+      totalCount: data.searchProjects.totalCount,
+      pageInfo: data.searchProjects.pageInfo,
+    };
+  }
+
+  async projectStatuses() {
+    const data = await this.graphql(`query ProjectStatuses {
+      projectStatuses(first: 250) {
+        nodes { id name type color description position indefinite createdAt updatedAt archivedAt }
+      }
+    }`);
+    return data.projectStatuses.nodes.filter((status) => !status.archivedAt);
+  }
+
+  async resolveProjectStatus(reference, requiredType) {
+    const statuses = await this.projectStatuses();
+    let matches;
+    if (reference) {
+      const lowered = reference.toLowerCase();
+      matches = statuses.filter((status) => status.id === reference || status.name.toLowerCase() === lowered);
+    } else {
+      matches = statuses.filter((status) => status.type === requiredType);
+    }
+    const status = exactOne(matches, "Project status", reference || requiredType);
+    if (requiredType && status.type !== requiredType) {
+      throw new CliError("INVALID_STATE", `Project status ${status.name} has type ${status.type}, expected ${requiredType}.`);
+    }
+    return status;
+  }
+
+  async projectLabels(groupName) {
+    const data = await this.graphql(`query ProjectLabels {
+      projectLabels(first: 250) { nodes {
+        id name color description isGroup retiredAt archivedAt parent { id name }
+      } }
+    }`);
+    let labels = data.projectLabels.nodes.filter((label) => !label.retiredAt && !label.archivedAt);
+    if (groupName) labels = labels.filter((label) => label.parent?.name.toLowerCase() === groupName.toLowerCase());
+    return labels;
+  }
+
+  async resolveProjectLabel(reference, parentGroup) {
+    const labels = await this.projectLabels();
+    const lowered = reference.toLowerCase();
+    let matches = labels.filter((label) =>
+      (label.id === reference || label.name.toLowerCase() === lowered) && !label.isGroup
+    );
+    if (parentGroup) matches = matches.filter((label) => label.parent?.name.toLowerCase() === parentGroup.toLowerCase());
+    return exactOne(matches, "Project label", reference);
   }
 
   async resolveProject(reference, teamId) {
+    const parsedReference = parseProjectReference(reference);
     const data = await this.graphql(
       `query ResolveProject($filter: ProjectFilter!) {
-        projects(first: 50, filter: $filter) { nodes { id name slugId url teams(first: 10) { nodes { id key name } } } }
+        projects(first: 50, filter: $filter, includeArchived: true) {
+          nodes { ${PROJECT_SUMMARY_FIELDS} }
+        }
       }`,
       { filter: { and: [
         { or: [
-          ...(isUuid(reference) ? [{ id: { eq: reference } }] : []),
-          { name: { eqIgnoreCase: reference } },
+          ...(isUuid(parsedReference) ? [{ id: { eq: parsedReference } }] : []),
+          { name: { eqIgnoreCase: parsedReference } },
+          { slugId: { eqIgnoreCase: parsedReference } },
         ] },
         ...(teamId ? [{ accessibleTeams: { some: { id: { eq: teamId } } } }] : []),
       ] } },
     );
-    const matches = data.projects.nodes;
-    return exactOne(matches, "Project", reference);
+    return exactOne(data.projects.nodes, "Project", reference);
   }
 
   async resolveUser(reference) {
@@ -411,6 +552,227 @@ export class LinearClient {
       this.issueConnection(issue.id, "inverseRelations", `id type issue { ${SUMMARY_FIELDS} }`),
     ]);
     return { ...issue, comments, labels, children, attachments, relations, inverseRelations };
+  }
+
+  async projectCore(reference, teamReference) {
+    const parsedReference = parseProjectReference(reference);
+    const team = teamReference ? await this.resolveTeam(teamReference) : null;
+    const project = isUuid(parsedReference)
+      ? { id: parsedReference }
+      : await this.resolveProject(reference, team?.id);
+    const data = await this.graphql(`query ProjectCore($id: String!) {
+      project(id: $id) {
+        ${PROJECT_SUMMARY_FIELDS}
+        content color icon trashed autoArchivedAt startedAt healthUpdatedAt
+        creator { id name email }
+      }
+    }`, { id: project.id });
+    if (!data.project) throw new CliError("NOT_FOUND", `Project not found: ${reference}`);
+    return data.project;
+  }
+
+  async projectConnection(projectId, field, selection) {
+    const nodes = [];
+    let after = null;
+    do {
+      const data = await this.graphql(`query ProjectConnection($id: String!, $after: String) {
+        project(id: $id) {
+          ${field}(first: ${PAGE_SIZE}, after: $after) {
+            nodes { ${selection} }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }`, { id: projectId, after });
+      const connection = data.project[field];
+      nodes.push(...connection.nodes);
+      after = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
+      if (connection.pageInfo.hasNextPage && !after) throw new CliError("API_ERROR", `${field} pagination did not advance.`);
+    } while (after);
+    return nodes;
+  }
+
+  async projectGet(reference, teamReference) {
+    const project = await this.projectCore(reference, teamReference);
+    const [comments, labels, issues, attachments, members, milestones, updates, relations, inverseRelations, teams, initiatives] = await Promise.all([
+      this.projectConnection(project.id, "comments", `id body createdAt updatedAt editedAt resolvedAt url parent { id } user { id name email } externalUser { id name }`),
+      this.projectConnection(project.id, "labels", `id name color description isGroup parent { id name }`),
+      this.projectConnection(project.id, "issues", `${SUMMARY_FIELDS}`),
+      this.projectConnection(project.id, "attachments", `id title subtitle url sourceType metadata createdAt updatedAt creator { id name email }`),
+      this.projectConnection(project.id, "members", `id name email active`),
+      this.projectConnection(project.id, "projectMilestones", `id name description targetDate status progress sortOrder createdAt updatedAt`),
+      this.projectConnection(project.id, "projectUpdates", `id body health createdAt updatedAt editedAt url isStale user { id name email }`),
+      this.projectConnection(project.id, "relations", `id type anchorType relatedAnchorType relatedProject { ${PROJECT_SUMMARY_FIELDS} }`),
+      this.projectConnection(project.id, "inverseRelations", `id type anchorType relatedAnchorType project { ${PROJECT_SUMMARY_FIELDS} }`),
+      this.projectConnection(project.id, "teams", `id key name description`),
+      this.projectConnection(project.id, "initiatives", `id name slugId url description createdAt updatedAt`),
+    ]);
+    return { ...project, comments, labels, issues, attachments, members, milestones, updates, relations, inverseRelations, teams, initiatives };
+  }
+
+  async resolveProjectUsers(value, optionName) {
+    const references = commaSeparated(value, optionName);
+    if (references[0].toLowerCase() === "none") return [];
+    const users = [];
+    for (const reference of references) users.push(await this.resolveUser(reference));
+    return users;
+  }
+
+  async resolveProjectTeams(value) {
+    const references = commaSeparated(value, "teams");
+    const teams = [];
+    for (const reference of references) teams.push(await this.resolveTeam(reference));
+    return teams;
+  }
+
+  async buildProjectInput(options, primaryTeam, { creating = false } = {}) {
+    const input = {};
+    const description = await fileOrValue(options, "description", "description-file");
+    const content = await fileOrValue(options, "content", "content-file");
+    if (description !== undefined) input.description = description;
+    if (content !== undefined) input.content = content;
+    if (options.name !== undefined) input.name = options.name;
+
+    if (creating) {
+      const teams = [primaryTeam];
+      if (options.teams !== undefined) teams.push(...await this.resolveProjectTeams(options.teams));
+      input.teamIds = [...new Set(teams.map((team) => team.id))];
+    } else if (options.teams !== undefined) {
+      input.teamIds = (await this.resolveProjectTeams(options.teams)).map((team) => team.id);
+    }
+
+    if (options.status !== undefined) input.statusId = (await this.resolveProjectStatus(options.status)).id;
+    if (options.lead !== undefined) {
+      input.leadId = options.lead.toLowerCase() === "none" ? null : (await this.resolveUser(options.lead)).id;
+    }
+    if (options.members !== undefined) {
+      input.memberIds = (await this.resolveProjectUsers(options.members, "members")).map((user) => user.id);
+    }
+    if (options.labels !== undefined) {
+      const references = commaSeparated(options.labels, "labels");
+      input.labelIds = [];
+      if (references[0].toLowerCase() !== "none") {
+        for (const reference of references) input.labelIds.push((await this.resolveProjectLabel(reference)).id);
+      }
+    }
+    const priority = priorityOption(options.priority);
+    if (priority !== undefined) input.priority = priority;
+    const startDate = dateOption(options.start, "start");
+    if (startDate !== undefined) input.startDate = startDate;
+    const targetDate = dateOption(options.target, "target");
+    if (targetDate !== undefined) input.targetDate = targetDate;
+    for (const field of ["icon", "color"]) {
+      if (options[field] !== undefined) input[field] = options[field].toLowerCase() === "none" ? null : options[field];
+    }
+    return input;
+  }
+
+  async projectCreate(options) {
+    const team = await this.resolveTeam(required(options.team, "--team"));
+    required(options.name, "--name");
+    const input = await this.buildProjectInput(options, team, { creating: true });
+    const data = await this.graphql(`mutation CreateProject($input: ProjectCreateInput!) {
+      projectCreate(input: $input) { success project { ${PROJECT_SUMMARY_FIELDS} content color icon } }
+    }`, { input });
+    return data.projectCreate;
+  }
+
+  async projectUpdate(reference, options) {
+    const project = await this.projectCore(reference, options.team);
+    const input = await this.buildProjectInput(options);
+    if (Object.keys(input).length === 0) throw new CliError("USAGE_ERROR", "At least one project update field is required.");
+    const data = await this.graphql(`mutation UpdateProject($id: String!, $input: ProjectUpdateInput!) {
+      projectUpdate(id: $id, input: $input) { success project { ${PROJECT_SUMMARY_FIELDS} content color icon } }
+    }`, { id: project.id, input });
+    return data.projectUpdate;
+  }
+
+  async projectComment(reference, body, teamReference) {
+    required(body, "--body or --body-file");
+    const project = await this.projectCore(reference, teamReference);
+    const data = await this.graphql(`mutation CommentProject($input: CommentCreateInput!) {
+      commentCreate(input: $input) { success comment { id body createdAt url user { id name email } } }
+    }`, { input: { projectId: project.id, body } });
+    return data.commentCreate;
+  }
+
+  async setProjectLabel(reference, labelReference, add, teamReference) {
+    const project = await this.projectCore(reference, teamReference);
+    const label = await this.resolveProjectLabel(labelReference);
+    const field = add ? "projectAddLabel" : "projectRemoveLabel";
+    const data = await this.graphql(`mutation SetProjectLabel($id: String!, $labelId: String!) {
+      ${field}(id: $id, labelId: $labelId) {
+        success project { ${PROJECT_SUMMARY_FIELDS} labels(first: 250) { nodes { id name } } }
+      }
+    }`, { id: project.id, labelId: label.id });
+    return { ...data[field], label };
+  }
+
+  async projectTriage(reference, labelReference, groupName = "Triage", teamReference) {
+    const project = await this.projectCore(reference, teamReference);
+    project.labels = await this.projectConnection(project.id, "labels", `id name color description isGroup parent { id name }`);
+    const target = await this.resolveProjectLabel(labelReference, groupName);
+    const current = project.labels.filter((label) => label.parent?.name.toLowerCase() === groupName.toLowerCase());
+    const removedLabelIds = current.filter((label) => label.id !== target.id).map((label) => label.id);
+    if (current.some((label) => label.id === target.id) && removedLabelIds.length === 0) {
+      return { success: true, unchanged: true, project, label: target, removedLabelIds };
+    }
+    const labelIds = [
+      ...project.labels.filter((label) => !current.some((item) => item.id === label.id)).map((label) => label.id),
+      target.id,
+    ];
+    const data = await this.graphql(`mutation TriageProject($id: String!, $input: ProjectUpdateInput!) {
+      projectUpdate(id: $id, input: $input) {
+        success project { ${PROJECT_SUMMARY_FIELDS} labels(first: 250) { nodes { id name parent { id name } } } }
+      }
+    }`, { id: project.id, input: { labelIds } });
+    return { ...data.projectUpdate, label: target, removedLabelIds };
+  }
+
+  async terminalProjectStatus(reference, type, statusReference, teamReference) {
+    const project = await this.projectCore(reference, teamReference);
+    const status = await this.resolveProjectStatus(statusReference, type);
+    const data = await this.graphql(`mutation TerminalProjectStatus($id: String!, $input: ProjectUpdateInput!) {
+      projectUpdate(id: $id, input: $input) { success project { ${PROJECT_SUMMARY_FIELDS} } }
+    }`, { id: project.id, input: { statusId: status.id } });
+    return { ...data.projectUpdate, status };
+  }
+
+  async relateProjects(reference, relatedReference, type, teamReference) {
+    if (!["blocks", "related"].includes(type)) {
+      throw new CliError("USAGE_ERROR", "--type must be blocks or related.");
+    }
+    const [project, relatedProject] = await Promise.all([
+      this.projectCore(reference, teamReference),
+      this.projectCore(relatedReference),
+    ]);
+    const input = {
+      projectId: project.id,
+      relatedProjectId: relatedProject.id,
+      anchorType: "project",
+      relatedAnchorType: "project",
+      type,
+    };
+    const data = await this.graphql(`mutation RelateProjects($input: ProjectRelationCreateInput!) {
+      projectRelationCreate(input: $input) {
+        success projectRelation { id type project { id name } relatedProject { id name } }
+      }
+    }`, { input });
+    return data.projectRelationCreate;
+  }
+
+  async projectArchiveAction(reference, action, teamReference) {
+    const fields = {
+      archive: "projectArchive",
+      unarchive: "projectUnarchive",
+      delete: "projectDelete",
+    };
+    const field = fields[action];
+    if (!field) throw new CliError("USAGE_ERROR", `Unknown project archive action: ${action}`);
+    const project = await this.projectCore(reference, teamReference);
+    const data = await this.graphql(`mutation ProjectArchiveAction($id: String!) {
+      ${field}(id: $id) { success entity { ${PROJECT_SUMMARY_FIELDS} } }
+    }`, { id: project.id });
+    return data[field];
   }
 
   async buildIssueInput(options, team, { creating = false } = {}) {
@@ -536,7 +898,11 @@ async function main(argv = process.argv.slice(2)) {
     case "teams": data = await client.teams(); break;
     case "states": data = await client.states(required(options.team, "--team")); break;
     case "labels": data = await client.labels(options.team, options.group); break;
-    case "projects": data = await client.projects(options.team); break;
+    case "projects": data = await client.projects(options.team, { includeArchived: Boolean(options.all), limit: limitOption(options.limit) }); break;
+    case "project-statuses": data = await client.projectStatuses(); break;
+    case "project-labels": data = await client.projectLabels(options.group); break;
+    case "project-search": data = await client.projectSearch(required(positionals.join(" "), "Search text"), options.team, { includeArchived: Boolean(options.all), limit: limitOption(options.limit) }); break;
+    case "project-get": data = await client.projectGet(required(positionals[0], "Project reference"), options.team); break;
     case "list": data = await client.list(required(options.team, "--team"), { includeClosed: Boolean(options.all), limit: limitOption(options.limit) }); break;
     case "search": data = await client.search(required(positionals.join(" "), "Search text"), options.team, { includeClosed: Boolean(options.all), limit: limitOption(options.limit) }); break;
     case "get": data = await client.get(required(positionals[0], "Issue reference")); break;
@@ -549,6 +915,18 @@ async function main(argv = process.argv.slice(2)) {
     case "complete": data = await client.terminalState(required(positionals[0], "Issue reference"), "completed", options.state); break;
     case "cancel": data = await client.terminalState(required(positionals[0], "Issue reference"), "canceled", options.state); break;
     case "relate": data = await client.relate(required(positionals[0], "Issue reference"), required(options.to, "--to"), required(options.type, "--type")); break;
+    case "project-create": data = await client.projectCreate(options); break;
+    case "project-update": data = await client.projectUpdate(required(positionals[0], "Project reference"), options); break;
+    case "project-comment": data = await client.projectComment(required(positionals[0], "Project reference"), await fileOrValue(options, "body", "body-file"), options.team); break;
+    case "project-add-label": data = await client.setProjectLabel(required(positionals[0], "Project reference"), required(options.label, "--label"), true, options.team); break;
+    case "project-remove-label": data = await client.setProjectLabel(required(positionals[0], "Project reference"), required(options.label, "--label"), false, options.team); break;
+    case "project-triage": data = await client.projectTriage(required(positionals[0], "Project reference"), required(options.label, "--label"), options.group, options.team); break;
+    case "project-complete": data = await client.terminalProjectStatus(required(positionals[0], "Project reference"), "completed", options.status, options.team); break;
+    case "project-cancel": data = await client.terminalProjectStatus(required(positionals[0], "Project reference"), "canceled", options.status, options.team); break;
+    case "project-relate": data = await client.relateProjects(required(positionals[0], "Project reference"), required(options.to, "--to"), required(options.type, "--type"), options.team); break;
+    case "project-archive": data = await client.projectArchiveAction(required(positionals[0], "Project reference"), "archive", options.team); break;
+    case "project-unarchive": data = await client.projectArchiveAction(required(positionals[0], "Project reference"), "unarchive", options.team); break;
+    case "project-delete": data = await client.projectArchiveAction(required(positionals[0], "Project reference"), "delete", options.team); break;
     default: throw new CliError("USAGE_ERROR", `Unknown command: ${command}. Run with --help.`);
   }
 

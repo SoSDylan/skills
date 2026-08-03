@@ -11,6 +11,7 @@ import {
   LinearClient,
   parseArguments,
   parseIssueReference,
+  parseProjectReference,
 } from "../scripts/linear-cli.mjs";
 
 const CLI = new URL("../scripts/linear-cli.mjs", import.meta.url).pathname;
@@ -49,6 +50,18 @@ function issue(overrides = {}) {
   };
 }
 
+function project(overrides = {}) {
+  return {
+    id: "project-id",
+    name: "Feature",
+    slugId: "a1b2c3d4e5f6",
+    url: "https://linear.app/crewtraka/project/feature-a1b2c3d4e5f6",
+    status: { id: "planned-id", name: "Planned", type: "planned" },
+    teams: { nodes: [{ id: "team-id", key: "WEB", name: "Web" }] },
+    ...overrides,
+  };
+}
+
 test("runs when invoked through a symlinked skill directory", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "linear-cli-symlink-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -62,7 +75,7 @@ test("runs when invoked through a symlinked skill directory", async (t) => {
   );
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /linear-cli — Linear issue operations/);
+  assert.match(result.stdout, /linear-cli — Linear issue and project operations/);
   assert.equal(result.stderr, "");
 });
 
@@ -75,6 +88,17 @@ test("parses issue identifiers and canonical Linear URLs", () => {
   );
   assert.throws(() => parseIssueReference("https://evil.example/crewtraka/issue/WEB-123"), /linear\.app/);
   assert.throws(() => parseIssueReference("https://linear.app/crewtraka/project/WEB-123"), /\/issue\//);
+});
+
+test("parses project names, UUIDs, and canonical Linear URLs", () => {
+  assert.equal(parseProjectReference("Feature"), "Feature");
+  assert.equal(parseProjectReference("550e8400-e29b-41d4-a716-446655440000"), "550e8400-e29b-41d4-a716-446655440000");
+  assert.equal(
+    parseProjectReference("https://linear.app/crewtraka/project/feature-a1b2c3d4e5f6/overview"),
+    "a1b2c3d4e5f6",
+  );
+  assert.throws(() => parseProjectReference("https://evil.example/crewtraka/project/feature-a1b2c3d4e5f6"), /linear\.app/);
+  assert.throws(() => parseProjectReference("https://linear.app/crewtraka/issue/WEB-123"), /\/project\//);
 });
 
 test("parses positional arguments, values, and booleans", () => {
@@ -179,6 +203,150 @@ test("complete resolves the team's unique completed state", async (t) => {
   const result = await client.terminalState("WEB-123", "completed");
   assert.equal(result.success, true);
   assert.deepEqual(updateInput, { stateId: "done-id" });
+});
+
+test("project-get resolves a URL and paginates complete project connections", async (t) => {
+  const fields = [
+    "comments", "labels", "issues", "attachments", "members", "projectMilestones",
+    "projectUpdates", "relations", "inverseRelations", "teams", "initiatives",
+  ];
+  const { client, requests } = await withGraphqlServer(t, ({ query, variables }) => {
+    if (query.includes("query ResolveProject")) {
+      assert.equal(variables.filter.and[0].or.some((filter) => filter.slugId?.eqIgnoreCase === "a1b2c3d4e5f6"), true);
+      return { data: { projects: { nodes: [project()] } } };
+    }
+    if (query.includes("query ProjectCore")) return { data: { project: project({ content: "Full brief" }) } };
+    if (query.includes("query ProjectConnection")) {
+      const field = fields.find((name) => query.includes(`${name}(first:`));
+      if (field === "comments" && !variables.after) {
+        return { data: { project: { comments: {
+          nodes: [{ id: "comment-1", body: "First" }],
+          pageInfo: { hasNextPage: true, endCursor: "next-comment" },
+        } } } };
+      }
+      const nodes = field === "comments" ? [{ id: "comment-2", body: "Second" }] : [];
+      return { data: { project: { [field]: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } } };
+    }
+    throw new Error("Unexpected query");
+  });
+
+  const result = await client.projectGet("https://linear.app/crewtraka/project/feature-a1b2c3d4e5f6/overview");
+
+  assert.equal(result.id, "project-id");
+  assert.deepEqual(result.comments.map((comment) => comment.id), ["comment-1", "comment-2"]);
+  assert.equal(requests.filter((request) => request.query.includes("query ProjectConnection")).length, 12);
+});
+
+test("project-create resolves teams, status, users, and labels before mutation", async (t) => {
+  let createInput;
+  const { client } = await withGraphqlServer(t, ({ query, variables }) => {
+    if (query.includes("query ResolveTeam")) {
+      const reference = variables.filter.or.find((filter) => filter.key)?.key.eqIgnoreCase;
+      const team = reference === "APP"
+        ? { id: "app-team-id", key: "APP", name: "App" }
+        : { id: "team-id", key: "WEB", name: "Web" };
+      return { data: { teams: { nodes: [team] } } };
+    }
+    if (query.includes("query ProjectStatuses")) {
+      return { data: { projectStatuses: { nodes: [{ id: "started-id", name: "In Progress", type: "started", archivedAt: null }] } } };
+    }
+    if (query.includes("query ResolveUser")) {
+      const reference = variables.filter.or.find((filter) => filter.name)?.name.eqIgnoreCase;
+      return { data: { users: { nodes: [{ id: `${reference.toLowerCase()}-id`, name: reference, email: `${reference.toLowerCase()}@example.com` }] } } };
+    }
+    if (query.includes("query ProjectLabels")) {
+      return { data: { projectLabels: { nodes: [{ id: "label-id", name: "Customer", isGroup: false, retiredAt: null, archivedAt: null, parent: null }] } } };
+    }
+    if (query.includes("mutation CreateProject")) {
+      createInput = variables.input;
+      return { data: { projectCreate: { success: true, project: project() } } };
+    }
+    throw new Error("Unexpected query");
+  });
+
+  const result = await client.projectCreate({
+    team: "WEB",
+    teams: "APP",
+    name: "Feature",
+    description: "Description",
+    content: "Full brief",
+    status: "In Progress",
+    lead: "Alex",
+    members: "Alex,Sam",
+    labels: "Customer",
+    priority: "2",
+    start: "2026-03-01",
+    target: "2026-04-01",
+  });
+
+  assert.equal(result.success, true);
+  assert.deepEqual(createInput, {
+    description: "Description",
+    content: "Full brief",
+    name: "Feature",
+    teamIds: ["team-id", "app-team-id"],
+    statusId: "started-id",
+    leadId: "alex-id",
+    memberIds: ["alex-id", "sam-id"],
+    labelIds: ["label-id"],
+    priority: 2,
+    startDate: "2026-03-01",
+    targetDate: "2026-04-01",
+  });
+});
+
+test("project-update clears supported nullable and collection fields", async (t) => {
+  let updateInput;
+  const projectId = "550e8400-e29b-41d4-a716-446655440000";
+  const { client } = await withGraphqlServer(t, ({ query, variables }) => {
+    if (query.includes("query ProjectCore")) return { data: { project: project({ id: projectId }) } };
+    if (query.includes("mutation UpdateProject")) {
+      updateInput = variables.input;
+      return { data: { projectUpdate: { success: true, project: project({ id: projectId }) } } };
+    }
+    throw new Error("Unexpected query");
+  });
+
+  const result = await client.projectUpdate(projectId, {
+    lead: "none",
+    members: "none",
+    labels: "none",
+    start: "none",
+    target: "none",
+    icon: "none",
+    color: "none",
+  });
+
+  assert.equal(result.success, true);
+  assert.deepEqual(updateInput, {
+    leadId: null,
+    memberIds: [],
+    labelIds: [],
+    startDate: null,
+    targetDate: null,
+    icon: null,
+    color: null,
+  });
+});
+
+test("project-complete resolves the unique completed project status", async (t) => {
+  let updateInput;
+  const { client } = await withGraphqlServer(t, ({ query, variables }) => {
+    if (query.includes("query ResolveProject")) return { data: { projects: { nodes: [project()] } } };
+    if (query.includes("query ProjectCore")) return { data: { project: project() } };
+    if (query.includes("query ProjectStatuses")) {
+      return { data: { projectStatuses: { nodes: [{ id: "completed-id", name: "Completed", type: "completed", archivedAt: null }] } } };
+    }
+    if (query.includes("mutation TerminalProjectStatus")) {
+      updateInput = variables.input;
+      return { data: { projectUpdate: { success: true, project: project({ status: { id: "completed-id", name: "Completed", type: "completed" } }) } } };
+    }
+    throw new Error("Unexpected query");
+  });
+
+  const result = await client.terminalProjectStatus("Feature", "completed");
+  assert.equal(result.success, true);
+  assert.deepEqual(updateInput, { statusId: "completed-id" });
 });
 
 test("reports API errors without exposing credentials", async (t) => {

@@ -1,6 +1,6 @@
 ---
 name: linear-cli
-description: Interacts with Linear issues, comments, labels, projects, states, and relations through Linear's GraphQL API. Use when the user mentions Linear issue management or supplies a linear.app issue URL.
+description: Manage Linear issues, projects, comments, labels, statuses, and states via GraphQL. Use when the user mentions Linear or supplies a linear.app URL.
 ---
 
 # Linear CLI
@@ -40,32 +40,47 @@ URLs with available read-only tooling when they matter to the user's request.
 Reading is complete when every returned field and linked dependency relevant to
 the request has been accounted for.
 
-## 3. Apply explicit mutations
+## 3. Read projects completely
+
+Accept a project name, slug, UUID, or `https://linear.app/<workspace>/project/...`
+URL. Use `project-get` for one project; it paginates comments, labels, issues,
+attachments, members, milestones, updates, relations, teams, and initiatives.
+Use `projects` or `project-search` for discovery. Resolve lifecycle values and
+labels through `project-statuses` and `project-labels`.
+
+```bash
+node "<linear-cli>/scripts/linear-cli.mjs" project-get "Customer portal"
+node "<linear-cli>/scripts/linear-cli.mjs" projects --team WEB
+node "<linear-cli>/scripts/linear-cli.mjs" project-search "portal" --team WEB
+```
+
+## 4. Apply explicit mutations
 
 Use write commands only when the user explicitly requests a Linear change.
-Preserve fields the user did not ask to change, especially the issue's Project.
-Use `--description-file` and `--body-file` for multiline Markdown.
+Preserve fields the user did not ask to change. Use file options for multiline
+Markdown. Issue mutations use unprefixed commands; project mutations use
+`project-*` commands.
 
 ```bash
 node "<linear-cli>/scripts/linear-cli.mjs" create --team WEB --title "..." --description-file /tmp/issue.md
-node "<linear-cli>/scripts/linear-cli.mjs" update WEB-123 --state "In Progress"
-node "<linear-cli>/scripts/linear-cli.mjs" comment WEB-123 --body-file /tmp/comment.md
-node "<linear-cli>/scripts/linear-cli.mjs" triage WEB-123 --group Triage --label ready-for-agent
 node "<linear-cli>/scripts/linear-cli.mjs" complete WEB-123
-node "<linear-cli>/scripts/linear-cli.mjs" relate WEB-123 --to APP-45 --type blocks
+node "<linear-cli>/scripts/linear-cli.mjs" project-create --team WEB --name "..." --content-file /tmp/project.md
+node "<linear-cli>/scripts/linear-cli.mjs" project-update "Customer portal" --status "In Progress"
+node "<linear-cli>/scripts/linear-cli.mjs" project-comment "Customer portal" --body-file /tmp/comment.md
+node "<linear-cli>/scripts/linear-cli.mjs" project-complete "Customer portal"
 ```
 
 For decline or cancellation conventions that require an explanation, create and
-verify the comment first, then run `cancel`. If multiple completed or canceled
-states exist, pass the intended state with `--state`; ambiguity is a stop
+verify the comment first, then run `cancel` or `project-cancel`. If multiple
+terminal states or statuses exist, pass the intended one; ambiguity is a stop
 condition, not permission to choose.
 
-## 4. Verify the result
+## 5. Verify the result
 
 Inspect every command's JSON. Continue only from `ok: true`; report `ok: false`
-with its code and error. After a mutation, run `get` and confirm every requested
-field changed while preserved fields remain intact. The operation is complete
-when the requested state is visible in the fresh read.
+with its code and error. After a mutation, run `get` or `project-get` and confirm
+every requested field changed while preserved fields remain intact. The
+operation is complete when the requested state is visible in the fresh read.
 
 For all commands and clearing semantics, run:
 
