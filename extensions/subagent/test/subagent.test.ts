@@ -1,0 +1,731 @@
+import assert from "node:assert/strict";
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { initTheme } from "@earendil-works/pi-coding-agent";
+import extension from "../index.ts";
+
+interface RegisteredTool {
+	name: string;
+	description: string;
+	promptGuidelines?: string[];
+	renderShell?: string;
+	renderResult?: (...args: any[]) => any;
+	execute: (...args: any[]) => Promise<any>;
+}
+
+async function makeFakePi(root: string): Promise<{ command: string; logPath: string }> {
+	const command = join(root, "fake-pi.mjs");
+	const logPath = join(root, "calls.jsonl");
+	await writeFile(
+		command,
+		`#!/usr/bin/env node
+import { appendFile, readFile } from "node:fs/promises";
+const args = process.argv.slice(2);
+const systemPromptIndex = args.indexOf("--append-system-prompt");
+const systemPrompt = systemPromptIndex >= 0 ? await readFile(args[systemPromptIndex + 1], "utf8") : "";
+const prompt = args.at(-1);
+const log = (event) => appendFile(process.env.PI_SUBAGENT_TEST_LOG, JSON.stringify({ event, prompt, args, cwd: process.cwd(), depth: process.env.PI_SUBAGENT_DEPTH, systemPrompt }) + "\\n");
+await log("start");
+if (prompt.includes("[SLOW]")) await new Promise((resolve) => setTimeout(resolve, 300));
+if (prompt.includes("[TICK]")) await new Promise((resolve) => setTimeout(resolve, 1150));
+if (prompt.includes("[FAIL]")) {
+  console.error("fake child failure");
+  await log("end");
+  process.exit(2);
+}
+const text = prompt.includes("[LARGE]")
+  ? "line of output\\n".repeat(6000)
+  : prompt.includes("[UTF8]")
+    ? "café"
+  : prompt.includes("[LONG_LINE]")
+    ? "x".repeat(300)
+  : prompt.includes("[ENTRY_TAIL]")
+    ? Array.from({ length: 100 }, (_, index) => "assistant tail " + (index + 1)).join("\\n")
+  : prompt.includes("[LINES_MANY]")
+    ? Array.from({ length: 600 }, (_, index) => "activity line " + (index + 1)).join("\\n")
+  : prompt.includes("[LINES]")
+    ? "line 1\\nline 2\\nline 3\\nline 4\\nline 5\\nline 6\\nline 7\\nline 8\\nline 9\\nline 10"
+    : "child:" + prompt;
+const message = {
+  role: "assistant",
+  content: [{ type: "text", text }],
+  api: "anthropic-messages",
+  provider: "test",
+  model: "child-model",
+  usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0.1, output: 0.2, cacheRead: 0, cacheWrite: 0, total: 0.3 } },
+  stopReason: prompt.includes("[MODEL_ERROR]") ? "error" : "stop",
+  errorMessage: prompt.includes("[MODEL_ERROR]") ? "provider failed" : undefined,
+  timestamp: Date.now()
+};
+console.log(JSON.stringify({ type: "session", version: 3, id: "fake", timestamp: new Date().toISOString(), cwd: process.cwd() }));
+if (prompt.includes("[STREAM]")) {
+  console.log(JSON.stringify({
+    type: "message_update",
+    message: { ...message, content: [{ type: "text", text: "Inspecting files" }] },
+    assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Inspecting files", partial: { ...message, content: [{ type: "text", text: "Inspecting files" }] } }
+  }));
+}
+if (prompt.includes("[MANY_MESSAGES]")) {
+  for (let index = 0; index < 20; index += 1) {
+    console.log(JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "toolResult",
+        toolCallId: "message-" + index,
+        toolName: "read",
+        content: [{ type: "text", text: "tool payload ".repeat(1000) }],
+        isError: false,
+        timestamp: Date.now()
+      }
+    }));
+  }
+}
+if (prompt.includes("[STDERR_LARGE]")) console.error("diagnostic ".repeat(10000));
+if (prompt.includes("[ENTRY_TAIL]")) {
+  const toolText = Array.from({ length: 450 }, (_, index) => "tool tail " + (index + 1)).join("\\n");
+  console.log(JSON.stringify({ type: "tool_execution_start", toolCallId: "tail-tool", toolName: "read", args: { path: "tail.txt" } }));
+  console.log(JSON.stringify({ type: "tool_execution_end", toolCallId: "tail-tool", toolName: "read", result: { content: [{ type: "text", text: toolText }] }, isError: false }));
+}
+if (prompt.includes("[MEDIUM_TOOL]")) {
+  console.log(JSON.stringify({ type: "tool_execution_start", toolCallId: "medium-tool", toolName: "write", args: { path: "medium.txt", content: "m".repeat(7000) } }));
+  console.log(JSON.stringify({ type: "tool_execution_end", toolCallId: "medium-tool", toolName: "write", result: { content: [{ type: "text", text: "written" }] }, isError: false }));
+}
+if (prompt.includes("[HUGE_TOOL]")) {
+  console.log(JSON.stringify({ type: "tool_execution_start", toolCallId: "huge-tool", toolName: "write", args: { path: "large.txt", content: "a".repeat(50000) } }));
+  console.log(JSON.stringify({ type: "tool_execution_end", toolCallId: "huge-tool", toolName: "write", result: { content: [{ type: "text", text: "b".repeat(50000) }] }, isError: false }));
+}
+if (prompt.includes("[MANY]")) {
+  for (let index = 0; index < 600; index += 1) {
+    console.log(JSON.stringify({ type: "tool_execution_start", toolCallId: "many-" + index, toolName: "read", args: { path: "src/file-" + index + ".ts" } }));
+    console.log(JSON.stringify({ type: "tool_execution_end", toolCallId: "many-" + index, toolName: "read", result: { content: [{ type: "text", text: "line " + index }] }, isError: false }));
+  }
+}
+if (prompt.includes("[ACTIVITY]")) {
+  console.log(JSON.stringify({
+    type: "message_update",
+    message: { ...message, content: [{ type: "thinking", thinking: "Checking assumptions" }] },
+    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Checking assumptions", partial: { ...message, content: [{ type: "thinking", thinking: "Checking assumptions" }] } }
+  }));
+  console.log(JSON.stringify({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read", args: { path: "src/auth.ts" } }));
+  console.log(JSON.stringify({ type: "tool_execution_update", toolCallId: "tool-1", toolName: "read", args: { path: "src/auth.ts" }, partialResult: { content: [{ type: "text", text: "partial file" }], details: { lines: 1 } } }));
+  console.log(JSON.stringify({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "read", result: { content: [{ type: "text", text: "complete file" }], details: { lines: 1 } }, isError: false }));
+  console.log(JSON.stringify({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10, errorMessage: "rate limited" }));
+  console.error("child diagnostic");
+}
+if (prompt.includes("[UTF8]")) {
+  const encoded = Buffer.from(JSON.stringify({ type: "message_end", message }) + "\\n", "utf8");
+  const splitAt = encoded.indexOf(Buffer.from("é", "utf8")) + 1;
+  process.stdout.write(encoded.subarray(0, splitAt));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  process.stdout.write(encoded.subarray(splitAt));
+} else {
+  console.log(JSON.stringify({ type: "message_end", message }));
+}
+await log("end");
+`,
+		{ mode: 0o700 },
+	);
+	await chmod(command, 0o700);
+	return { command, logPath };
+}
+
+async function readLog(logPath: string): Promise<any[]> {
+	const content = await readFile(logPath, "utf8").catch(() => "");
+	return content
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+}
+
+async function withFakePi(run: (fixture: { root: string; logPath: string }) => Promise<void>): Promise<void> {
+	const root = await mkdtemp(join(tmpdir(), "pi-subagent-test-"));
+	const previousCommand = process.env.PI_SUBAGENT_PI_COMMAND;
+	const previousLog = process.env.PI_SUBAGENT_TEST_LOG;
+	try {
+		const fake = await makeFakePi(root);
+		process.env.PI_SUBAGENT_PI_COMMAND = fake.command;
+		process.env.PI_SUBAGENT_TEST_LOG = fake.logPath;
+		await run({ root, logPath: fake.logPath });
+	} finally {
+		if (previousCommand === undefined) delete process.env.PI_SUBAGENT_PI_COMMAND;
+		else process.env.PI_SUBAGENT_PI_COMMAND = previousCommand;
+		if (previousLog === undefined) delete process.env.PI_SUBAGENT_TEST_LOG;
+		else process.env.PI_SUBAGENT_TEST_LOG = previousLog;
+		await rm(root, { recursive: true, force: true });
+	}
+}
+
+function loadExtension() {
+	const tools = new Map<string, RegisteredTool>();
+	extension({
+		registerTool(tool: RegisteredTool) {
+			tools.set(tool.name, tool);
+		},
+		getThinkingLevel() {
+			return "high";
+		},
+	} as any);
+	return tools.get("subagent");
+}
+
+function makeContext(cwd: string) {
+	return {
+		cwd,
+		model: { provider: "test", id: "parent-model" },
+	};
+}
+
+test("parent can delegate one self-contained read-only prompt", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-subagent-test-"));
+	const previousCommand = process.env.PI_SUBAGENT_PI_COMMAND;
+	const previousLog = process.env.PI_SUBAGENT_TEST_LOG;
+
+	try {
+		const fake = await makeFakePi(root);
+		process.env.PI_SUBAGENT_PI_COMMAND = fake.command;
+		process.env.PI_SUBAGENT_TEST_LOG = fake.logPath;
+		const tool = loadExtension();
+		assert.ok(tool);
+		assert.match(tool.description, /isolated/i);
+		assert.ok(tool.promptGuidelines?.some((line) => line.includes("cannot see the parent conversation")));
+
+		const result = await tool.execute("call-1", { prompt: "Inspect src/auth.ts" }, undefined, undefined, makeContext(root));
+		assert.equal(result.content[0].text, "child:Inspect src/auth.ts");
+		assert.equal(result.details.mode, "single");
+		assert.equal(result.details.results[0].capability, "read-only");
+		assert.deepEqual(result.usage, {
+			input: 10,
+			output: 5,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 15,
+			cost: { input: 0.1, output: 0.2, cacheRead: 0, cacheWrite: 0, total: 0.3 },
+		});
+
+		const call = (await readLog(fake.logPath)).find((entry) => entry.event === "start");
+		assert.ok(call);
+		assert.equal(call.cwd, await realpath(root));
+		assert.equal(call.depth, "1");
+		assert.match(call.systemPrompt, /isolated subagent/i);
+		assert.deepEqual(call.args.slice(0, 9), [
+			"--mode",
+			"json",
+			"-p",
+			"--no-session",
+			"--no-extensions",
+			"--model",
+			"test/parent-model",
+			"--thinking",
+			"high",
+		]);
+		assert.ok(call.args.includes("read,grep,find,ls"));
+		assert.ok(!call.args.includes("bash"));
+	} finally {
+		if (previousCommand === undefined) delete process.env.PI_SUBAGENT_PI_COMMAND;
+		else process.env.PI_SUBAGENT_PI_COMMAND = previousCommand;
+		if (previousLog === undefined) delete process.env.PI_SUBAGENT_TEST_LOG;
+		else process.env.PI_SUBAGENT_TEST_LOG = previousLog;
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("child JSON events preserve UTF-8 characters split across output chunks", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+
+		const result = await tool.execute(
+			"utf8",
+			{ prompt: "[UTF8] return text" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+
+		assert.equal(result.content[0].text, "café");
+	});
+});
+
+test("parent receives streamed child prose through structured activity updates", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+		const updates: any[] = [];
+
+		const result = await tool.execute(
+			"stream",
+			{ prompt: "[STREAM] inspect the project" },
+			undefined,
+			(update: any) => updates.push(update),
+			makeContext(root),
+		);
+
+		const streaming = updates.find((update) =>
+			update.details.results[0].activity?.some(
+				(entry: any) => entry.kind === "assistant" && entry.text === "Inspecting files" && entry.status === "running",
+			),
+		);
+		assert.ok(streaming, "expected a running assistant activity update");
+		assert.equal(streaming.details.results[0].status, "running");
+		assert.equal(result.content[0].text, "child:[STREAM] inspect the project");
+	});
+});
+
+test("collapsed rendering uses separate child cards with one-line headers and an eight-line tail", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool?.renderResult);
+		const result = await tool.execute(
+			"cards",
+			{
+				tasks: [
+					{ label: "Files", prompt: "[LINES] inspect files" },
+					{ label: "Tests", prompt: "inspect tests", capability: "write" },
+				],
+			},
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const foregroundCalls: Array<{ color: string; text: string }> = [];
+		const theme = {
+			fg: (color: string, text: string) => {
+				foregroundCalls.push({ color, text });
+				return text;
+			},
+			bg: (_color: string, text: string) => text,
+			bold: (text: string) => text,
+		};
+		initTheme();
+		const component = tool.renderResult(result, { expanded: false }, theme);
+		const rendered = component.render(100).join("\n");
+
+		assert.equal(tool.renderShell, "self");
+		assert.ok(foregroundCalls.some(({ color, text }) => color === "text" && text === "line 7"));
+		assert.match(rendered, /Files · read-only · complete · \d/);
+		assert.match(rendered, /Tests · write · complete · \d/);
+		assert.ok(rendered.indexOf("Files") < rendered.indexOf("Tests"));
+		assert.doesNotMatch(rendered, /line [12]\s*\n/);
+		for (let line = 3; line <= 10; line += 1) assert.match(rendered, new RegExp(`line ${line}`));
+		assert.match(rendered, /Ctrl\+O|expand/i);
+	});
+});
+
+test("collapsed cards limit wrapped output to eight visual lines and keep header metadata together", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool?.renderResult);
+		const result = await tool.execute(
+			"visual-lines",
+			{
+				tasks: [
+					{
+						label: "A very long child label that must not push metadata onto another line",
+						prompt: "[LONG_LINE] inspect",
+					},
+				],
+			},
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const theme = {
+			fg: (_color: string, text: string) => text,
+			bg: (_color: string, text: string) => text,
+			bold: (text: string) => text,
+		};
+		initTheme();
+		const renderedLines = tool.renderResult(result, { expanded: false }, theme).render(60);
+
+		assert.equal(renderedLines.filter((line: string) => line.includes("read-only") || line.includes("complete")).length, 1);
+		assert.ok(renderedLines.filter((line: string) => /x{5}/.test(line)).length <= 8);
+	});
+});
+
+test("expanded child cards show the prompt, full structured timeline, and usage footer", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool?.renderResult);
+		const result = await tool.execute(
+			"expanded",
+			{ prompt: "[ACTIVITY] inspect auth", capability: "read-only" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const theme = {
+			fg: (_color: string, text: string) => text,
+			bg: (_color: string, text: string) => text,
+			bold: (text: string) => text,
+		};
+		initTheme();
+		const component = tool.renderResult(result, { expanded: true }, theme);
+		const rendered = component.render(100).join("\n");
+
+		assert.match(rendered, /Subagent · read-only · complete · \d/);
+		assert.match(rendered, /Prompt.*\[ACTIVITY\] inspect auth/s);
+		assert.match(rendered, /thinking: Checking assumptions/);
+		assert.match(rendered, /read/);
+		assert.match(rendered, /src\/auth\.ts/);
+		assert.match(rendered, /complete file/);
+		assert.match(rendered, /Retry 1\/3: rate limited/);
+		assert.match(rendered, /stderr: child diagnostic/);
+		assert.match(rendered, /1 turn.*↑10.*↓5.*\$0\.3000.*child-model/);
+		assert.doesNotMatch(rendered, /isolated subagent/i);
+	});
+});
+
+test("child activity is bounded and reports omitted transcript entries", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+
+		let updateCount = 0;
+		const result = await tool.execute(
+			"many",
+			{ prompt: "[MANY] inspect many files" },
+			undefined,
+			() => {
+				updateCount += 1;
+			},
+			makeContext(root),
+		);
+		const child = result.details.results[0];
+
+		assert.ok(updateCount < 100, `expected coalesced updates, received ${updateCount}`);
+		assert.ok(child.activity.length < 600);
+		assert.ok(child.activityTruncation.omittedEntries > 0);
+		assert.ok(Buffer.byteLength(JSON.stringify(child.activity), "utf8") <= 32 * 1024);
+		assert.ok(child.activity.some((entry: any) => entry.kind === "assistant" && /child:\[MANY\]/.test(entry.text)));
+	});
+});
+
+test("raw child details stay bounded while the complete final response is preserved", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+
+		const result = await tool.execute(
+			"bounded-details",
+			{ prompt: "[MANY_MESSAGES] [STDERR_LARGE] inspect" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const child = result.details.results[0];
+
+		assert.equal(child.messages.length, 1);
+		assert.equal(child.messages[0].role, "assistant");
+		assert.equal(result.content[0].text, "child:[MANY_MESSAGES] [STDERR_LARGE] inspect");
+		assert.ok(Buffer.byteLength(child.stderr, "utf8") <= 32 * 1024);
+	});
+});
+
+test("transcript retention keeps the latest lines from a partially evicted entry", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+
+		const result = await tool.execute(
+			"entry-tail",
+			{ prompt: "[ENTRY_TAIL] inspect" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const child = result.details.results[0];
+		const toolActivity = child.activity.find((entry: any) => entry.kind === "tool");
+
+		assert.ok(toolActivity, "expected the retained tail of the tool entry");
+		assert.match(JSON.stringify(toolActivity.result), /tool tail 450/);
+		assert.doesNotMatch(JSON.stringify(toolActivity.result), /tool tail 1(?:\\n|\\")/);
+		assert.ok(child.activityTruncation.omittedLines >= 50);
+	});
+});
+
+test("tool arguments remain complete when the whole transcript fits within the child limit", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+
+		const result = await tool.execute(
+			"medium-tool",
+			{ prompt: "[MEDIUM_TOOL] write output" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const toolActivity = result.details.results[0].activity.find((entry: any) => entry.kind === "tool");
+
+		assert.equal(toolActivity.args.content.length, 7_000);
+		assert.equal(toolActivity.args.transcriptTruncated, undefined);
+	});
+});
+
+test("large tool arguments and results are bounded with explicit transcript truncation", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+
+		const result = await tool.execute(
+			"huge-tool",
+			{ prompt: "[HUGE_TOOL] write output" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const child = result.details.results[0];
+
+		assert.ok(Buffer.byteLength(JSON.stringify(child.activity), "utf8") <= 32 * 1024);
+		assert.ok(child.activityTruncation.omittedBytes > 0);
+		assert.ok(child.activity.some((entry: any) => entry.kind === "tool" && entry.toolName === "write"));
+
+		assert.ok(tool.renderResult);
+		initTheme();
+		const theme = {
+			fg: (_color: string, text: string) => text,
+			bg: (_color: string, text: string) => text,
+			bold: (text: string) => text,
+		};
+		const rendered = tool.renderResult(result, { expanded: true }, theme).render(100).join("\n");
+		assert.match(rendered, /transcript truncated/i);
+	});
+});
+
+test("a single large activity keeps its latest 500 lines and preserves the full final message", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+
+		const result = await tool.execute(
+			"many-lines",
+			{ prompt: "[LINES_MANY] produce transcript" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const child = result.details.results[0];
+		const assistant = child.activity.find((entry: any) => entry.kind === "assistant");
+
+		assert.ok(assistant.text.split("\n").length <= 500);
+		assert.doesNotMatch(assistant.text, /activity line 1(?:\n|$)/);
+		assert.match(assistant.text, /activity line 600/);
+		assert.ok(child.activityTruncation.omittedLines >= 100);
+		assert.match(child.messages[0].content[0].text, /activity line 1\n/);
+	});
+});
+
+test("running child status includes elapsed-time refreshes", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+		const updates: any[] = [];
+
+		const result = await tool.execute(
+			"elapsed",
+			{ prompt: "[TICK] wait for work" },
+			undefined,
+			(update: any) => updates.push(structuredClone(update)),
+			makeContext(root),
+		);
+		const child = result.details.results[0];
+		const runningUpdates = updates.filter((update) => update.details.results[0].status === "running");
+
+		assert.ok(runningUpdates.length >= 2, "expected a start update and an elapsed-time refresh");
+		assert.equal(child.status, "complete");
+		assert.ok(child.finishedAt - child.startedAt >= 1_000);
+	});
+});
+
+test("parent receives thinking, tool lifecycle, retry, and stderr activity", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+
+		const result = await tool.execute(
+			"activity",
+			{ prompt: "[ACTIVITY] inspect auth" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const activity = result.details.results[0].activity;
+
+		assert.ok(
+			activity.some(
+				(entry: any) => entry.kind === "thinking" && entry.text === "Checking assumptions" && entry.status === "complete",
+			),
+		);
+		assert.deepEqual(
+			activity.find((entry: any) => entry.kind === "tool"),
+			{
+				id: "tool-1",
+				kind: "tool",
+				toolName: "read",
+				args: { path: "src/auth.ts" },
+				result: { content: [{ type: "text", text: "complete file" }], details: { lines: 1 } },
+				status: "complete",
+				isError: false,
+				timestamp: activity.find((entry: any) => entry.kind === "tool").timestamp,
+			},
+		);
+		assert.ok(activity.some((entry: any) => entry.kind === "lifecycle" && /retry 1\/3.*rate limited/i.test(entry.text)));
+		assert.ok(activity.some((entry: any) => entry.kind === "stderr" && /child diagnostic/.test(entry.text)));
+	});
+});
+
+test("parent can run independent handoffs in parallel with bounded concurrency", async () => {
+	await withFakePi(async ({ root, logPath }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+		const tasks = Array.from({ length: 6 }, (_, index) => ({
+			label: `Review ${index + 1}`,
+			prompt: `[SLOW] task ${index + 1}`,
+		}));
+
+		const result = await tool.execute("parallel", { tasks }, undefined, undefined, makeContext(root));
+		assert.equal(result.details.mode, "parallel");
+		assert.equal(result.details.results.length, 6);
+		assert.equal(result.usage.input, 60);
+		assert.equal(result.usage.cost.total, 1.8);
+		assert.match(result.content[0].text, /## Review 1 — completed/);
+		assert.match(result.content[0].text, /child:\[SLOW\] task 6/);
+
+		let active = 0;
+		let maximum = 0;
+		for (const entry of await readLog(logPath)) {
+			active += entry.event === "start" ? 1 : -1;
+			maximum = Math.max(maximum, active);
+		}
+		assert.equal(active, 0);
+		assert.equal(maximum, 4);
+	});
+});
+
+test("write capability explicitly enables mutation tools", async () => {
+	await withFakePi(async ({ root, logPath }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+		await tool.execute(
+			"write",
+			{ prompt: "Implement the approved change", capability: "write" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+		const call = (await readLog(logPath)).find((entry) => entry.event === "start");
+		assert.ok(call.args.includes("read,grep,find,ls,bash,edit,write"));
+	});
+});
+
+test("model failures produce a failed child state", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+
+		const result = await tool.execute(
+			"model-error",
+			{ prompt: "[MODEL_ERROR] inspect auth" },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+
+		assert.equal(result.details.results[0].status, "failed");
+		assert.match(result.content[0].text, /provider failed/);
+		assert.ok(
+			result.details.results[0].activity.some(
+				(entry: any) => entry.kind === "lifecycle" && entry.status === "failed" && /provider failed/.test(entry.text),
+			),
+		);
+	});
+});
+
+test("aborting the parent terminates an active child", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 75);
+		const started = Date.now();
+		const result = await tool.execute(
+			"abort",
+			{ prompt: "[SLOW] keep working" },
+			controller.signal,
+			undefined,
+			makeContext(root),
+		);
+		assert.equal(result.details.results[0].aborted, true);
+		assert.equal(result.details.results[0].status, "cancelled");
+		assert.match(result.content[0].text, /aborted/i);
+		assert.ok(Date.now() - started < 2_000);
+	});
+});
+
+test("cancelling parallel work does not start queued children", async () => {
+	await withFakePi(async ({ root, logPath }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 75);
+
+		const result = await tool.execute(
+			"parallel-abort",
+			{
+				tasks: Array.from({ length: 6 }, (_, index) => ({
+					label: `Task ${index + 1}`,
+					prompt: `[SLOW] task ${index + 1}`,
+				})),
+			},
+			controller.signal,
+			undefined,
+			makeContext(root),
+		);
+
+		assert.ok(result.details.results.every((child: any) => child.status === "cancelled"));
+		assert.ok(result.details.results.filter((child: any) => child.startedAt !== undefined).length <= 4);
+		const starts = (await readLog(logPath)).filter((entry) => entry.event === "start");
+		assert.ok(starts.length <= 4, `expected at most four starts, received ${starts.length}`);
+	});
+});
+
+test("model-visible output is truncated while full output stays in details", async () => {
+	await withFakePi(async ({ root }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+		const result = await tool.execute("large", { prompt: "[LARGE]" }, undefined, undefined, makeContext(root));
+		assert.match(result.content[0].text, /output truncated/i);
+		assert.ok(Buffer.byteLength(result.content[0].text, "utf8") <= 50 * 1024);
+		assert.ok(result.content[0].text.split("\n").length <= 2_000);
+		assert.ok(result.details.results[0].messages[0].content[0].text.length > result.content[0].text.length);
+	});
+});
+
+test("tool rejects ambiguous modes and recursive delegation", async () => {
+	const tool = loadExtension();
+	assert.ok(tool);
+	await assert.rejects(
+		tool.execute(
+			"ambiguous",
+			{ prompt: "one", tasks: [{ prompt: "two" }] },
+			undefined,
+			undefined,
+			makeContext(process.cwd()),
+		),
+		/exactly one mode/i,
+	);
+
+	const previousDepth = process.env.PI_SUBAGENT_DEPTH;
+	process.env.PI_SUBAGENT_DEPTH = "1";
+	try {
+		await assert.rejects(
+			tool.execute("recursive", { prompt: "recurse" }, undefined, undefined, makeContext(process.cwd())),
+			/cannot delegate/i,
+		);
+	} finally {
+		if (previousDepth === undefined) delete process.env.PI_SUBAGENT_DEPTH;
+		else process.env.PI_SUBAGENT_DEPTH = previousDepth;
+	}
+});

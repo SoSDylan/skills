@@ -39,6 +39,18 @@ Run `/reload` in Pi after installing or updating an extension. See
 [`extensions/browser-tools/README.md`](extensions/browser-tools/README.md) for
 browser usage and configuration.
 
+### Subagents
+
+```bash
+npm install --prefix extensions/subagent
+mkdir -p ~/.pi/agent/extensions
+ln -s "$(pwd)/extensions/subagent" ~/.pi/agent/extensions/subagent
+```
+
+Run `/reload` in Pi after installation. See
+[`extensions/subagent/README.md`](extensions/subagent/README.md) for handoff
+prompt guidance, capability profiles, and parallel execution.
+
 ## Skills
 
 ### `distill-to-docs`
@@ -70,6 +82,10 @@ Investigates a Zendesk ticket through read-only evidence gathering and produces 
 ### `browser-tools`
 
 Drives a visible Google Chrome session from Pi with Playwright, including navigation, interaction, accessibility snapshots, console capture, responsive viewport testing, and screenshots returned to vision-capable models. Browser tools are disabled by default; use `/browser on` and `/browser off` to control them per session.
+
+### `subagent`
+
+Runs parent-generated handoff prompts in isolated Pi processes. It supports read-only or write-capable children and bounded parallel execution without bundled personas or workflow prompt files.
 
 ## License
 
