@@ -1,6 +1,6 @@
 ---
 name: keychain-env
-description: Manages macOS Keychain credentials and injects them into child-process environments. Use when a macOS user mentions Keychain or Keychain Access, wants to store, update, check, retrieve, or remove a credential there, or needs Keychain-backed environment variables for a command.
+description: Manage macOS Keychain credentials and inject them into child-process environments. Use when the user wants to store, update, retrieve, or remove Keychain credentials, or needs Keychain-backed env vars.
 ---
 
 # Keychain Environment
