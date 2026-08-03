@@ -9,6 +9,7 @@ import extension from "../index.ts";
 interface RegisteredTool {
 	name: string;
 	description: string;
+	parameters?: any;
 	promptGuidelines?: string[];
 	renderShell?: string;
 	renderResult?: (...args: any[]) => any;
@@ -177,7 +178,11 @@ function makeContext(cwd: string) {
 	};
 }
 
-test("parent can delegate one self-contained read-only prompt", async () => {
+function oneTask(prompt: string, capability?: "read-only" | "write") {
+	return { tasks: [{ label: "Task", prompt, ...(capability ? { capability } : {}) }] };
+}
+
+test("parent can delegate one labeled task", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-subagent-test-"));
 	const previousCommand = process.env.PI_SUBAGENT_PI_COMMAND;
 	const previousLog = process.env.PI_SUBAGENT_TEST_LOG;
@@ -191,9 +196,10 @@ test("parent can delegate one self-contained read-only prompt", async () => {
 		assert.match(tool.description, /isolated/i);
 		assert.ok(tool.promptGuidelines?.some((line) => line.includes("cannot see the parent conversation")));
 
-		const result = await tool.execute("call-1", { prompt: "Inspect src/auth.ts" }, undefined, undefined, makeContext(root));
-		assert.equal(result.content[0].text, "child:Inspect src/auth.ts");
-		assert.equal(result.details.mode, "single");
+		assert.deepEqual(tool.parameters?.required, ["tasks"]);
+		assert.deepEqual(tool.parameters?.properties.tasks.items.required, ["label", "prompt"]);
+		const result = await tool.execute("call-1", oneTask("Inspect src/auth.ts"), undefined, undefined, makeContext(root));
+		assert.match(result.content[0].text, /## Task — completed\n\nchild:Inspect src\/auth\.ts/);
 		assert.equal(result.details.results[0].capability, "read-only");
 		assert.deepEqual(result.usage, {
 			input: 10,
@@ -238,13 +244,13 @@ test("child JSON events preserve UTF-8 characters split across output chunks", a
 
 		const result = await tool.execute(
 			"utf8",
-			{ prompt: "[UTF8] return text" },
+			oneTask("[UTF8] return text"),
 			undefined,
 			undefined,
 			makeContext(root),
 		);
 
-		assert.equal(result.content[0].text, "café");
+		assert.match(result.content[0].text, /café/);
 	});
 });
 
@@ -256,7 +262,7 @@ test("parent receives streamed child prose through structured activity updates",
 
 		const result = await tool.execute(
 			"stream",
-			{ prompt: "[STREAM] inspect the project" },
+			oneTask("[STREAM] inspect the project"),
 			undefined,
 			(update: any) => updates.push(update),
 			makeContext(root),
@@ -269,7 +275,7 @@ test("parent receives streamed child prose through structured activity updates",
 		);
 		assert.ok(streaming, "expected a running assistant activity update");
 		assert.equal(streaming.details.results[0].status, "running");
-		assert.equal(result.content[0].text, "child:[STREAM] inspect the project");
+		assert.match(result.content[0].text, /child:\[STREAM\] inspect the project/);
 	});
 });
 
@@ -345,7 +351,7 @@ test("expanded child cards show the prompt, full structured timeline, and usage 
 		assert.ok(tool?.renderResult);
 		const result = await tool.execute(
 			"expanded",
-			{ prompt: "[ACTIVITY] inspect auth", capability: "read-only" },
+			oneTask("[ACTIVITY] inspect auth", "read-only"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -359,7 +365,7 @@ test("expanded child cards show the prompt, full structured timeline, and usage 
 		const component = tool.renderResult(result, { expanded: true }, theme);
 		const rendered = component.render(100).join("\n");
 
-		assert.match(rendered, /Subagent · read-only · complete · \d/);
+		assert.match(rendered, /Task · read-only · complete · \d/);
 		assert.match(rendered, /Prompt.*\[ACTIVITY\] inspect auth/s);
 		assert.match(rendered, /thinking: Checking assumptions/);
 		assert.match(rendered, /read/);
@@ -380,7 +386,7 @@ test("child activity is bounded and reports omitted transcript entries", async (
 		let updateCount = 0;
 		const result = await tool.execute(
 			"many",
-			{ prompt: "[MANY] inspect many files" },
+			oneTask("[MANY] inspect many files"),
 			undefined,
 			() => {
 				updateCount += 1;
@@ -404,7 +410,7 @@ test("raw child details stay bounded while the complete final response is preser
 
 		const result = await tool.execute(
 			"bounded-details",
-			{ prompt: "[MANY_MESSAGES] [STDERR_LARGE] inspect" },
+			oneTask("[MANY_MESSAGES] [STDERR_LARGE] inspect"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -413,7 +419,7 @@ test("raw child details stay bounded while the complete final response is preser
 
 		assert.equal(child.messages.length, 1);
 		assert.equal(child.messages[0].role, "assistant");
-		assert.equal(result.content[0].text, "child:[MANY_MESSAGES] [STDERR_LARGE] inspect");
+		assert.match(result.content[0].text, /child:\[MANY_MESSAGES\] \[STDERR_LARGE\] inspect/);
 		assert.ok(Buffer.byteLength(child.stderr, "utf8") <= 32 * 1024);
 	});
 });
@@ -425,7 +431,7 @@ test("transcript retention keeps the latest lines from a partially evicted entry
 
 		const result = await tool.execute(
 			"entry-tail",
-			{ prompt: "[ENTRY_TAIL] inspect" },
+			oneTask("[ENTRY_TAIL] inspect"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -447,7 +453,7 @@ test("tool arguments remain complete when the whole transcript fits within the c
 
 		const result = await tool.execute(
 			"medium-tool",
-			{ prompt: "[MEDIUM_TOOL] write output" },
+			oneTask("[MEDIUM_TOOL] write output"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -466,7 +472,7 @@ test("large tool arguments and results are bounded with explicit transcript trun
 
 		const result = await tool.execute(
 			"huge-tool",
-			{ prompt: "[HUGE_TOOL] write output" },
+			oneTask("[HUGE_TOOL] write output"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -496,7 +502,7 @@ test("a single large activity keeps its latest 500 lines and preserves the full 
 
 		const result = await tool.execute(
 			"many-lines",
-			{ prompt: "[LINES_MANY] produce transcript" },
+			oneTask("[LINES_MANY] produce transcript"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -520,7 +526,7 @@ test("running child status includes elapsed-time refreshes", async () => {
 
 		const result = await tool.execute(
 			"elapsed",
-			{ prompt: "[TICK] wait for work" },
+			oneTask("[TICK] wait for work"),
 			undefined,
 			(update: any) => updates.push(structuredClone(update)),
 			makeContext(root),
@@ -541,7 +547,7 @@ test("parent receives thinking, tool lifecycle, retry, and stderr activity", asy
 
 		const result = await tool.execute(
 			"activity",
-			{ prompt: "[ACTIVITY] inspect auth" },
+			oneTask("[ACTIVITY] inspect auth"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -581,7 +587,6 @@ test("parent can run independent handoffs in parallel with bounded concurrency",
 		}));
 
 		const result = await tool.execute("parallel", { tasks }, undefined, undefined, makeContext(root));
-		assert.equal(result.details.mode, "parallel");
 		assert.equal(result.details.results.length, 6);
 		assert.equal(result.usage.input, 60);
 		assert.equal(result.usage.cost.total, 1.8);
@@ -605,7 +610,7 @@ test("write capability explicitly enables mutation tools", async () => {
 		assert.ok(tool);
 		await tool.execute(
 			"write",
-			{ prompt: "Implement the approved change", capability: "write" },
+			oneTask("Implement the approved change", "write"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -622,7 +627,7 @@ test("model failures produce a failed child state", async () => {
 
 		const result = await tool.execute(
 			"model-error",
-			{ prompt: "[MODEL_ERROR] inspect auth" },
+			oneTask("[MODEL_ERROR] inspect auth"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -647,7 +652,7 @@ test("aborting the parent terminates an active child", async () => {
 		const started = Date.now();
 		const result = await tool.execute(
 			"abort",
-			{ prompt: "[SLOW] keep working" },
+			oneTask("[SLOW] keep working"),
 			controller.signal,
 			undefined,
 			makeContext(root),
@@ -690,7 +695,7 @@ test("model-visible output is truncated while full output stays in details", asy
 	await withFakePi(async ({ root }) => {
 		const tool = loadExtension();
 		assert.ok(tool);
-		const result = await tool.execute("large", { prompt: "[LARGE]" }, undefined, undefined, makeContext(root));
+		const result = await tool.execute("large", oneTask("[LARGE]"), undefined, undefined, makeContext(root));
 		assert.match(result.content[0].text, /output truncated/i);
 		assert.ok(Buffer.byteLength(result.content[0].text, "utf8") <= 50 * 1024);
 		assert.ok(result.content[0].text.split("\n").length <= 2_000);
@@ -698,25 +703,15 @@ test("model-visible output is truncated while full output stays in details", asy
 	});
 });
 
-test("tool rejects ambiguous modes and recursive delegation", async () => {
+test("tool rejects recursive delegation", async () => {
 	const tool = loadExtension();
 	assert.ok(tool);
-	await assert.rejects(
-		tool.execute(
-			"ambiguous",
-			{ prompt: "one", tasks: [{ prompt: "two" }] },
-			undefined,
-			undefined,
-			makeContext(process.cwd()),
-		),
-		/exactly one mode/i,
-	);
 
 	const previousDepth = process.env.PI_SUBAGENT_DEPTH;
 	process.env.PI_SUBAGENT_DEPTH = "1";
 	try {
 		await assert.rejects(
-			tool.execute("recursive", { prompt: "recurse" }, undefined, undefined, makeContext(process.cwd())),
+			tool.execute("recursive", oneTask("recurse"), undefined, undefined, makeContext(process.cwd())),
 			/cannot delegate/i,
 		);
 	} finally {

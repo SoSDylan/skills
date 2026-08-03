@@ -1,6 +1,6 @@
 # Pi Subagent
 
-A Pi extension that delegates parent-generated handoff prompts to isolated child Pi processes. It supports one child or several independent children in parallel.
+A Pi extension that delegates one or more parent-generated handoff prompts to isolated child Pi processes. All tasks use the same parallel execution path.
 
 The extension does not define agent personas or load workflow prompt files. The parent decides the role, context, constraints, and expected output for each delegation.
 
@@ -26,21 +26,15 @@ For parallel work:
 
 > Run two subagents in parallel. Have one review the current change against our coding standards and the other review it against the issue requirements. Give each subagent all relevant context and require file and line references.
 
-The parent calls the `subagent` tool in one of two forms:
-
-```json
-{
-  "prompt": "A self-contained handoff prompt",
-  "capability": "read-only"
-}
-```
+The parent calls the `subagent` tool with one or more labeled tasks:
 
 ```json
 {
   "tasks": [
     {
       "label": "Standards review",
-      "prompt": "A self-contained standards-review handoff"
+      "prompt": "A self-contained standards-review handoff",
+      "capability": "read-only"
     },
     {
       "label": "Specification review",
@@ -49,6 +43,8 @@ The parent calls the `subagent` tool in one of two forms:
   ]
 }
 ```
+
+`tasks` must contain from one to eight items. Each task must provide `label` and `prompt`; `capability` is optional and defaults to `read-only`.
 
 ## Handoff prompts
 
@@ -72,7 +68,7 @@ The child starts in the parent's working directory and loads Pi's normal context
 ## Execution behavior
 
 - Each child runs as an ephemeral `pi --mode json -p --no-session --no-extensions` process. It uses only the built-in tools selected by its capability.
-- Parallel mode accepts up to eight tasks and runs at most four concurrently.
+- The task list accepts up to eight items and runs at most four concurrently.
 - Parent cancellation terminates the delegation. Child cards are display-only and do not have separate cancellation controls.
 - A child cannot recursively delegate another subagent.
 - Children cannot pause to ask the user questions. Give each child all required context in its handoff.

@@ -41,25 +41,20 @@ const CapabilitySchema = StringEnum(["read-only", "write"] as const, {
 });
 
 const TaskSchema = Type.Object({
-	label: Type.Optional(Type.String({ description: "Short label that distinguishes this task in parallel output" })),
+	label: Type.String({ description: "Short label that distinguishes this task in output" }),
 	prompt: Type.String({ description: "Self-contained handoff prompt for the isolated child" }),
 	capability: Type.Optional(CapabilitySchema),
 });
 
 const SubagentParameters = Type.Object({
-	prompt: Type.Optional(Type.String({ description: "Self-contained handoff prompt for one isolated child" })),
-	capability: Type.Optional(CapabilitySchema),
-	tasks: Type.Optional(
-		Type.Array(TaskSchema, {
-			description: `Independent handoff prompts to run in parallel (maximum ${MAX_PARALLEL_TASKS})`,
-			minItems: 1,
-			maxItems: MAX_PARALLEL_TASKS,
-		}),
-	),
+	tasks: Type.Array(TaskSchema, {
+		description: `One or more independent handoff prompts to run in parallel (maximum ${MAX_PARALLEL_TASKS})`,
+		minItems: 1,
+		maxItems: MAX_PARALLEL_TASKS,
+	}),
 });
 
 export interface SubagentDetails {
-	mode: "single" | "parallel";
 	results: SubagentRunResult[];
 }
 
@@ -70,16 +65,13 @@ function resultText(result: SubagentRunResult): string {
 }
 
 function modelVisibleContent(details: SubagentDetails): string {
-	const raw =
-		details.mode === "single"
-			? resultText(details.results[0])
-			: details.results
-					.map((result, index) => {
-						const title = result.label || `Task ${index + 1}`;
-						const status = failed(result) ? "failed" : "completed";
-						return `## ${title} — ${status}\n\n${resultText(result)}`;
-					})
-					.join("\n\n---\n\n");
+	const raw = details.results
+		.map((result, index) => {
+			const title = result.label || `Task ${index + 1}`;
+			const status = failed(result) ? "failed" : "completed";
+			return `## ${title} — ${status}\n\n${resultText(result)}`;
+		})
+		.join("\n\n---\n\n");
 
 	const truncated = truncateHead(raw, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
 	if (!truncated.truncated) return truncated.content;
@@ -408,10 +400,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 		name: "subagent",
 		label: "Subagent",
 		description:
-			"Run one self-contained prompt in an isolated Pi process, or run independent prompts in parallel. The child does not receive the parent conversation.",
-		promptSnippet: "Delegate self-contained work to isolated child agents, optionally in parallel",
+			"Run one or more self-contained prompts in isolated Pi processes. The children do not receive the parent conversation.",
+		promptSnippet: "Delegate one or more independent tasks to isolated child agents",
 		promptGuidelines: [
-			"Use subagent when an independent task benefits from an isolated context or can run concurrently with other work.",
+			"Use subagent when one or more independent tasks benefit from isolated context or concurrent work.",
 			"A subagent cannot see the parent conversation. Each subagent prompt must include the goal, relevant context and decisions, relevant paths or commands, constraints, and expected output.",
 			"Use read-only subagents by default. Select write capability only when the delegated task must modify files.",
 		],
@@ -422,39 +414,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			const depth = Number.parseInt(process.env[DEPTH_ENV] ?? "0", 10);
 			if (depth >= 1) throw new Error("Subagents cannot delegate to another subagent.");
 
-			const hasSingle = typeof params.prompt === "string" && params.prompt.trim().length > 0;
-			const hasParallel = (params.tasks?.length ?? 0) > 0;
-			if (Number(hasSingle) + Number(hasParallel) !== 1) {
-				throw new Error("Provide exactly one mode: prompt for a single child, or tasks for parallel children.");
-			}
-
 			const model = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined;
 			const thinkingLevel = pi.getThinkingLevel();
-
-			if (hasSingle) {
-				const result = await runSubagent({
-					prompt: params.prompt!,
-					capability: (params.capability ?? "read-only") as Capability,
-					cwd: ctx.cwd,
-					model,
-					thinkingLevel,
-					signal,
-					onUpdate: (partial) => {
-						onUpdate?.({
-							content: [{ type: "text", text: finalOutput(partial.messages) || "Subagent is working…" }],
-							details: { mode: "single", results: [partial] },
-						});
-					},
-				});
-				const details: SubagentDetails = { mode: "single", results: [result] };
-				return {
-					content: [{ type: "text", text: modelVisibleContent(details) }],
-					details,
-					usage: aggregateUsage(details.results),
-				};
-			}
-
-			const tasks = params.tasks!;
+			const tasks = params.tasks;
 			const current: SubagentRunResult[] = tasks.map((task) => ({
 				label: task.label,
 				prompt: task.prompt,
@@ -473,7 +435,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				const done = current.filter((result) => result.exitCode !== -1).length;
 				onUpdate?.({
 					content: [{ type: "text", text: `${done}/${current.length} subagents complete` }],
-					details: { mode: "parallel", results: [...current] },
+					details: { results: [...current] },
 				});
 			};
 
@@ -508,7 +470,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				emitParallelUpdate();
 				return result;
 			});
-			const details: SubagentDetails = { mode: "parallel", results };
+			const details: SubagentDetails = { results };
 			return {
 				content: [{ type: "text", text: modelVisibleContent(details) }],
 				details,
