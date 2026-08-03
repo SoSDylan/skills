@@ -273,7 +273,7 @@ test("parent receives streamed child prose through structured activity updates",
 	});
 });
 
-test("collapsed rendering uses separate child cards with one-line headers and an eight-line tail", async () => {
+test("collapsed rendering shows each completed child's full final response", async () => {
 	await withFakePi(async ({ root }) => {
 		const tool = loadExtension();
 		assert.ok(tool?.renderResult);
@@ -289,12 +289,8 @@ test("collapsed rendering uses separate child cards with one-line headers and an
 			undefined,
 			makeContext(root),
 		);
-		const foregroundCalls: Array<{ color: string; text: string }> = [];
 		const theme = {
-			fg: (color: string, text: string) => {
-				foregroundCalls.push({ color, text });
-				return text;
-			},
+			fg: (_color: string, text: string) => text,
 			bg: (_color: string, text: string) => text,
 			bold: (text: string) => text,
 		};
@@ -303,17 +299,16 @@ test("collapsed rendering uses separate child cards with one-line headers and an
 		const rendered = component.render(100).join("\n");
 
 		assert.equal(tool.renderShell, "self");
-		assert.ok(foregroundCalls.some(({ color, text }) => color === "text" && text === "line 7"));
 		assert.match(rendered, /Files · read-only · complete · \d/);
 		assert.match(rendered, /Tests · write · complete · \d/);
 		assert.ok(rendered.indexOf("Files") < rendered.indexOf("Tests"));
-		assert.doesNotMatch(rendered, /line [12]\s*\n/);
-		for (let line = 3; line <= 10; line += 1) assert.match(rendered, new RegExp(`line ${line}`));
-		assert.match(rendered, /Ctrl\+O|expand/i);
+		for (let line = 1; line <= 10; line += 1) assert.match(rendered, new RegExp(`line ${line}`));
+		assert.match(rendered, /Ctrl\+O|activity/i);
+		assert.match(rendered, /1 turn.*↑10.*↓5.*\$0\.3000.*child-model/);
 	});
 });
 
-test("collapsed cards limit wrapped output to eight visual lines and keep header metadata together", async () => {
+test("collapsed cards retain long completed output and keep header metadata together", async () => {
 	await withFakePi(async ({ root }) => {
 		const tool = loadExtension();
 		assert.ok(tool?.renderResult);
@@ -340,7 +335,7 @@ test("collapsed cards limit wrapped output to eight visual lines and keep header
 		const renderedLines = tool.renderResult(result, { expanded: false }, theme).render(60);
 
 		assert.equal(renderedLines.filter((line: string) => line.includes("read-only") || line.includes("complete")).length, 1);
-		assert.ok(renderedLines.filter((line: string) => /x{5}/.test(line)).length <= 8);
+		assert.equal(renderedLines.join("\n").match(/x/g)?.length, 300);
 	});
 });
 

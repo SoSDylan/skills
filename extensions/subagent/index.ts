@@ -237,19 +237,26 @@ function renderCollapsedCards(results: SubagentRunResult[], theme: Theme): Conta
 		const label = result.label || (results.length === 1 ? "Subagent" : `Task ${index + 1}`);
 		card.addChild(childHeader(result, label, appearance, theme));
 
-		const lines = activityLines(result, theme);
-		const wasTruncated =
-			result.activityTruncation.omittedEntries > 0 ||
-			result.activityTruncation.omittedLines > 0 ||
-			result.activityTruncation.omittedBytes > 0;
-		card.addChild(
-			new CollapsedTranscript(
-				lines.join("\n"),
-				theme.fg("muted", result.status === "queued" ? "Waiting to start" : "No transcript yet"),
-				wasTruncated,
-				theme,
-			),
-		);
+		const output = result.status === "complete" ? finalOutput(result.messages) : "";
+		if (output) {
+			card.addChild(new Markdown(output, 0, 0, getMarkdownTheme()));
+			card.addChild(new Text(theme.fg("muted", keyHint("app.tools.expand", "to view activity")), 0, 0));
+		} else {
+			const lines = activityLines(result, theme);
+			const wasTruncated =
+				result.activityTruncation.omittedEntries > 0 ||
+				result.activityTruncation.omittedLines > 0 ||
+				result.activityTruncation.omittedBytes > 0;
+			card.addChild(
+				new CollapsedTranscript(
+					lines.join("\n"),
+					theme.fg("muted", result.status === "queued" ? "Waiting to start" : "No transcript yet"),
+					wasTruncated,
+					theme,
+				),
+			);
+		}
+		addUsageFooter(card, result, theme);
 		container.addChild(card);
 	}
 	return container;
@@ -258,6 +265,11 @@ function renderCollapsedCards(results: SubagentRunResult[], theme: Theme): Conta
 function formatUsage(result: SubagentRunResult): string {
 	const turns = `${result.usage.turns} ${result.usage.turns === 1 ? "turn" : "turns"}`;
 	return `${turns} ↑${result.usage.input} ↓${result.usage.output} $${result.usage.cost.total.toFixed(4)}${result.model ? ` ${result.model}` : ""}`;
+}
+
+function addUsageFooter(card: Box, result: SubagentRunResult, theme: Theme): void {
+	card.addChild(new Spacer(1));
+	card.addChild(new Text(theme.fg("dim", formatUsage(result)), 0, 0));
 }
 
 function addExpandedActivity(card: Box, result: SubagentRunResult, theme: Theme): void {
@@ -337,8 +349,7 @@ function renderExpandedCards(results: SubagentRunResult[], theme: Theme): Contai
 		card.addChild(new Text(theme.fg("dim", result.prompt), 0, 0));
 		card.addChild(new Spacer(1));
 		addExpandedActivity(card, result, theme);
-		card.addChild(new Spacer(1));
-		card.addChild(new Text(theme.fg("dim", formatUsage(result)), 0, 0));
+		addUsageFooter(card, result, theme);
 		container.addChild(card);
 	}
 	return container;

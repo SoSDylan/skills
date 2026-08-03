@@ -82,7 +82,7 @@ The child starts in the parent's working directory and loads Pi's normal context
 
 Each child has a separate card. Cards remain in request order and show the label, capability, state, and elapsed time on one header line.
 
-The collapsed view shows the latest eight transcript lines. Use the configured tool-expansion key, `Ctrl+O` by default, to expand or collapse all child cards together.
+When a child completes, its collapsed card shows the full final response and a usage row with turns, token counts, cost, and model. While it runs, the card shows the latest eight transcript lines. Use the configured tool-expansion key, `Ctrl+O` by default, to expand or collapse all child cards together.
 
 The expanded view shows the handoff prompt and a chronological activity transcript. Activity includes streamed prose, model-provided thinking, tool arguments and results, retries, diagnostics, and final usage. Generated system instructions are not shown.
 
