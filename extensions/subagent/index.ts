@@ -1,9 +1,12 @@
 import { StringEnum, type Usage } from "@earendil-works/pi-ai";
+import { join } from "node:path";
 import {
 	type ExtensionAPI,
+	type ExtensionContext,
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
+	getAgentDir,
 	getMarkdownTheme,
 	keyHint,
 	truncateHead,
@@ -22,6 +25,18 @@ import {
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { Capability } from "./src/capabilities.ts";
+import { selectSubagentModel } from "./src/model-selector.ts";
+import {
+	cloneDefaultProfiles,
+	loadProfiles,
+	parseModelSpec,
+	profileDescription,
+	saveProfiles,
+	THINKING_LEVELS,
+	type SubagentProfile,
+	type SubagentProfiles,
+	type ThinkingLevel,
+} from "./src/profiles.ts";
 import {
 	emptyUsageStats,
 	failed,
@@ -41,11 +56,193 @@ const CapabilitySchema = StringEnum(["read-only", "write"] as const, {
 	default: "read-only",
 });
 
+const PROFILE_INHERIT = "(inherit parent)";
+const PROFILE_CANCEL = "Cancel";
+const PROFILE_SAVE = "Save";
+const PROFILE_CONFIG_FILE = "subagents.json";
+const PROFILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
+
 const TaskSchema = Type.Object({
 	label: Type.String({ description: "Short label that distinguishes this task in output" }),
 	prompt: Type.String({ description: "Self-contained handoff prompt for the isolated child" }),
 	capability: Type.Optional(CapabilitySchema),
+	profile: Type.Optional(
+		Type.String({ description: "Configured model/thinking profile. Manage profiles with /subagents." }),
+	),
 });
+
+let profiles: SubagentProfiles = cloneDefaultProfiles();
+let profilesLoaded = false;
+
+function profileConfigPath(): string {
+	return join(getAgentDir(), PROFILE_CONFIG_FILE);
+}
+
+function formatProfiles(profilesToFormat: SubagentProfiles): string {
+	const names = Object.keys(profilesToFormat).sort();
+	if (names.length === 0) return "No subagent profiles configured.";
+	return [
+		"Subagent profiles:",
+		...names.map((name) => `- ${profileDescription(name, profilesToFormat[name])}`),
+		`Stored in ${profileConfigPath()}`,
+	].join("\n");
+}
+
+async function ensureProfilesLoaded(ctx: ExtensionContext): Promise<void> {
+	if (profilesLoaded) return;
+	const loaded = await loadProfiles(profileConfigPath());
+	profiles = loaded.profiles;
+	profilesLoaded = true;
+	if (loaded.error) ctx.ui.notify(`Could not load subagent profiles: ${loaded.error}`, "warning");
+}
+
+async function persistProfiles(nextProfiles: SubagentProfiles, ctx: ExtensionContext): Promise<boolean> {
+	try {
+		await saveProfiles(profileConfigPath(), nextProfiles);
+		profiles = nextProfiles;
+		return true;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		ctx.ui.notify(`Could not save subagent profiles: ${message}`, "error");
+		return false;
+	}
+}
+
+async function chooseProfileModel(ctx: ExtensionContext, current?: string): Promise<{ cancelled: boolean; value?: string }> {
+	const selection = await selectSubagentModel(ctx, current);
+	if (selection.kind === "cancelled") return { cancelled: true };
+	if (selection.kind === "inherit") return { cancelled: false };
+	if (selection.kind === "model") return { cancelled: false, value: selection.value };
+
+	const entered = await ctx.ui.input("Model (provider/id)", current ?? "");
+	if (entered === undefined) return { cancelled: true };
+	const value = entered.trim();
+	if (value && !parseModelSpec(value)) {
+		ctx.ui.notify("Enter a model in provider/id format.", "warning");
+		return { cancelled: false, value: current };
+	}
+	return { cancelled: false, value: value || undefined };
+}
+
+async function editProfile(
+	name: string,
+	initial: SubagentProfile,
+	ctx: ExtensionContext,
+): Promise<SubagentProfile | null> {
+	let draft: SubagentProfile = { ...initial };
+	while (true) {
+		const modelChoice = `Model: ${draft.model ?? PROFILE_INHERIT}`;
+		const thinkingChoice = `Thinking: ${draft.thinkingLevel ?? PROFILE_INHERIT}`;
+		const action = await ctx.ui.select(`Edit subagent profile: ${name}`, [
+			modelChoice,
+			thinkingChoice,
+			PROFILE_SAVE,
+			PROFILE_CANCEL,
+		]);
+		if (!action || action === PROFILE_CANCEL) return null;
+		if (action === PROFILE_SAVE) return draft;
+
+		if (action === modelChoice) {
+			const selected = await chooseProfileModel(ctx, draft.model);
+			if (!selected.cancelled) draft = { ...draft, model: selected.value };
+			continue;
+		}
+
+		if (action === thinkingChoice) {
+			const selected = await ctx.ui.select("Subagent thinking level", [
+				PROFILE_INHERIT,
+				...THINKING_LEVELS,
+				PROFILE_CANCEL,
+			]);
+			if (selected && selected !== PROFILE_CANCEL) {
+				draft = {
+					...draft,
+					thinkingLevel: selected === PROFILE_INHERIT ? undefined : (selected as ThinkingLevel),
+				};
+			}
+		}
+	}
+}
+
+async function addProfile(ctx: ExtensionContext): Promise<void> {
+	const entered = await ctx.ui.input("New profile name", "scout");
+	if (entered === undefined) return;
+	const name = entered.trim();
+	if (!PROFILE_NAME_PATTERN.test(name)) {
+		ctx.ui.notify("Profile names must be 1–32 characters: letters, numbers, _ or -.", "warning");
+		return;
+	}
+	if (profiles[name]) {
+		ctx.ui.notify(`Profile \"${name}\" already exists.`, "warning");
+		return;
+	}
+
+	const profile = await editProfile(name, {}, ctx);
+	if (profile && (await persistProfiles({ ...profiles, [name]: profile }, ctx))) {
+		ctx.ui.notify(`Added subagent profile \"${name}\".`, "info");
+	}
+}
+
+async function editExistingProfile(name: string, ctx: ExtensionContext): Promise<void> {
+	const profile = await editProfile(name, profiles[name], ctx);
+	if (profile && (await persistProfiles({ ...profiles, [name]: profile }, ctx))) {
+		ctx.ui.notify(`Updated subagent profile \"${name}\".`, "info");
+	}
+}
+
+async function removeProfile(ctx: ExtensionContext): Promise<void> {
+	const names = Object.keys(profiles).sort();
+	if (names.length === 0) {
+		ctx.ui.notify("No subagent profiles to remove.", "info");
+		return;
+	}
+	const name = await ctx.ui.select("Remove subagent profile", [...names, PROFILE_CANCEL]);
+	if (!name || name === PROFILE_CANCEL) return;
+	const confirmed = await ctx.ui.confirm(`Remove \"${name}\"?`, "Tasks using this profile will no longer be able to run.");
+	if (!confirmed) return;
+	const nextProfiles = { ...profiles };
+	delete nextProfiles[name];
+	if (await persistProfiles(nextProfiles, ctx)) ctx.ui.notify(`Removed subagent profile \"${name}\".`, "info");
+}
+
+async function showProfileManager(ctx: ExtensionContext): Promise<void> {
+	while (true) {
+		const names = Object.keys(profiles).sort();
+		const selected = await ctx.ui.select("Subagent profiles", [
+			...names.map((name) => profileDescription(name, profiles[name])),
+			"Add profile",
+			...(names.length > 0 ? ["Remove profile"] : []),
+			"Done",
+		]);
+		if (!selected || selected === "Done") return;
+		if (selected === "Add profile") {
+			await addProfile(ctx);
+			continue;
+		}
+		if (selected === "Remove profile") {
+			await removeProfile(ctx);
+			continue;
+		}
+		const name = names.find((candidate) => profileDescription(candidate, profiles[candidate]) === selected);
+		if (name) await editExistingProfile(name, ctx);
+	}
+}
+
+function resolveProfile(
+	profileName: unknown,
+	inheritedModel: { provider: string; id: string } | undefined,
+	inheritedThinkingLevel: string | undefined,
+): { model: { provider: string; id: string } | undefined; thinkingLevel: string | undefined } {
+	if (profileName === undefined) return { model: inheritedModel, thinkingLevel: inheritedThinkingLevel };
+	if (typeof profileName !== "string" || !profiles[profileName]) {
+		const available = Object.keys(profiles).sort().join(", ") || "none";
+		throw new Error(`Unknown subagent profile \"${String(profileName)}\". Available profiles: ${available}.`);
+	}
+	const profile = profiles[profileName];
+	const model = profile.model ? parseModelSpec(profile.model) : inheritedModel;
+	if (profile.model && !model) throw new Error(`Invalid model in subagent profile \"${profileName}\": ${profile.model}`);
+	return { model, thinkingLevel: profile.thinkingLevel ?? inheritedThinkingLevel };
+}
 
 const SubagentParameters = Type.Object({
 	tasks: Type.Array(TaskSchema, {
@@ -655,6 +852,52 @@ async function mapWithConcurrency<T, U>(
 }
 
 export default function subagentExtension(pi: ExtensionAPI): void {
+	profiles = cloneDefaultProfiles();
+	profilesLoaded = false;
+
+	pi.registerCommand("subagents", {
+		description: "Add, edit, or remove subagent task profiles",
+		getArgumentCompletions: (prefix) => {
+			const options = ["list"];
+			const matches = options.filter((option) => option.startsWith(prefix));
+			return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
+		},
+		handler: async (args, ctx) => {
+			await ensureProfilesLoaded(ctx);
+			const command = args.trim();
+			if (command === "list") {
+				ctx.ui.notify(formatProfiles(profiles), "info");
+				return;
+			}
+			if (command) {
+				ctx.ui.notify(`Unknown /subagents command: ${command}. Use /subagents or /subagents list.`, "warning");
+				return;
+			}
+			if (ctx.mode !== "tui") {
+				ctx.ui.notify(`Manage profiles interactively with /subagents. Config: ${profileConfigPath()}`, "info");
+				return;
+			}
+			await showProfileManager(ctx);
+		},
+	});
+
+	pi.on("session_start", async (_event, ctx) => {
+		await ensureProfilesLoaded(ctx);
+	});
+
+	pi.on("before_agent_start", async (event, ctx) => {
+		await ensureProfilesLoaded(ctx);
+		const names = Object.keys(profiles).sort();
+		const profileContext = names.length
+			? [
+				  "Configured subagent task profiles:",
+				  ...names.map((name) => `- ${profileDescription(name, profiles[name])}`),
+				  "Set a task's profile field when delegating, or omit it to inherit the parent model and thinking level.",
+			  ].join("\n")
+			: "No subagent task profiles are configured. Omit the profile field to inherit the parent model and thinking level.";
+		return { systemPrompt: `${event.systemPrompt}\n\n${profileContext}` };
+	});
+
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
@@ -673,9 +916,13 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			const depth = Number.parseInt(process.env[DEPTH_ENV] ?? "0", 10);
 			if (depth >= 1) throw new Error("Subagents cannot delegate to another subagent.");
 
-			const model = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined;
-			const thinkingLevel = pi.getThinkingLevel();
+			await ensureProfilesLoaded(ctx);
+			const inheritedModel = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined;
+			const inheritedThinkingLevel = pi.getThinkingLevel();
 			const tasks = params.tasks;
+			const taskSettings = tasks.map((task) =>
+				resolveProfile(task.profile, inheritedModel, inheritedThinkingLevel),
+			);
 			const current: SubagentRunResult[] = tasks.map((task) => ({
 				label: task.label,
 				prompt: task.prompt,
@@ -717,8 +964,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 					prompt: task.prompt,
 					capability: (task.capability ?? "read-only") as Capability,
 					cwd: ctx.cwd,
-					model,
-					thinkingLevel,
+					model: taskSettings[index].model,
+					thinkingLevel: taskSettings[index].thinkingLevel,
 					signal,
 					onUpdate: (partial) => {
 						current[index] = partial;

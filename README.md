@@ -89,7 +89,7 @@ Drives a visible Google Chrome session from Pi with Playwright, including naviga
 
 ### `subagent`
 
-Runs parent-generated handoff prompts in isolated Pi processes. It supports read-only or write-capable children and bounded parallel execution without bundled personas or workflow prompt files.
+Runs parent-generated handoff prompts in isolated Pi processes. It supports read-only or write-capable children, bounded parallel execution, and configurable task profiles. Use `/subagents` to add, edit, or remove model/thinking profiles.
 
 ## License
 

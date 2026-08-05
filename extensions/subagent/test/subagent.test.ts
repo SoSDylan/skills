@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,6 +14,10 @@ interface RegisteredTool {
 	renderShell?: string;
 	renderResult?: (...args: any[]) => any;
 	execute: (...args: any[]) => Promise<any>;
+}
+
+interface RegisteredCommand {
+	handler: (args: string, ctx: any) => Promise<void>;
 }
 
 async function makeFakePi(root: string): Promise<{ command: string; logPath: string }> {
@@ -158,17 +162,26 @@ async function withFakePi(run: (fixture: { root: string; logPath: string }) => P
 	}
 }
 
-function loadExtension() {
+function loadExtensionWithCommands() {
 	const tools = new Map<string, RegisteredTool>();
+	const commands = new Map<string, RegisteredCommand>();
 	extension({
 		registerTool(tool: RegisteredTool) {
 			tools.set(tool.name, tool);
 		},
+		registerCommand(name: string, command: RegisteredCommand) {
+			commands.set(name, command);
+		},
+		on() {},
 		getThinkingLevel() {
 			return "high";
 		},
 	} as any);
-	return tools.get("subagent");
+	return { tools, commands };
+}
+
+function loadExtension() {
+	return loadExtensionWithCommands().tools.get("subagent");
 }
 
 function makeContext(cwd: string) {
@@ -233,6 +246,86 @@ test("parent can delegate one labeled task", async () => {
 		else process.env.PI_SUBAGENT_PI_COMMAND = previousCommand;
 		if (previousLog === undefined) delete process.env.PI_SUBAGENT_TEST_LOG;
 		else process.env.PI_SUBAGENT_TEST_LOG = previousLog;
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a configured task profile selects its model and thinking level", async () => {
+	await withFakePi(async ({ root, logPath }) => {
+		const agentDir = join(root, "agent");
+		await mkdir(agentDir, { recursive: true });
+		await writeFile(
+			join(agentDir, "subagents.json"),
+			JSON.stringify({ profiles: { focused: { model: "test/profile-model", thinkingLevel: "low" } } }),
+		);
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		try {
+			const tool = loadExtension();
+			assert.ok(tool);
+			const result = await tool.execute(
+			"profile",
+			{ tasks: [{ label: "Focused", prompt: "inspect", profile: "focused" }] },
+			undefined,
+			undefined,
+			makeContext(root),
+		);
+			assert.match(result.content[0].text, /child:inspect/);
+
+			const call = (await readLog(logPath)).find((entry) => entry.event === "start");
+			assert.ok(call);
+			assert.ok(call.args.includes("test/profile-model"));
+			assert.ok(call.args.includes("--thinking"));
+			assert.ok(call.args.includes("low"));
+		} finally {
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		}
+	});
+});
+
+test("/subagents can add and remove profiles", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-subagent-profile-test-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+	try {
+		const { commands } = loadExtensionWithCommands();
+		const command = commands.get("subagents");
+		assert.ok(command);
+		const selections = ["Add profile", "Save", "Done"];
+		const inputs = ["custom"];
+		const notifications: string[] = [];
+		const context = {
+			cwd: root,
+			mode: "tui",
+			hasUI: true,
+			modelRegistry: { getAll: () => [] },
+			ui: {
+				select: async (_title: string, options: string[]) => {
+					const selected = selections.shift();
+					assert.ok(selected && options.includes(selected), `unexpected selection: ${selected}`);
+					return selected;
+				},
+				input: async () => inputs.shift(),
+				confirm: async () => true,
+				notify: (message: string) => notifications.push(message),
+			},
+		};
+
+		await command.handler("", context);
+		const configPath = join(root, "agent", "subagents.json");
+		let saved = JSON.parse(await readFile(configPath, "utf8"));
+		assert.deepEqual(saved.profiles.custom, {});
+
+		selections.push("Remove profile", "custom", "Done");
+		await command.handler("", context);
+		saved = JSON.parse(await readFile(configPath, "utf8"));
+		assert.equal(saved.profiles.custom, undefined);
+		assert.ok(notifications.some((message) => /Added subagent profile/.test(message)));
+		assert.ok(notifications.some((message) => /Removed subagent profile/.test(message)));
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 		await rm(root, { recursive: true, force: true });
 	}
 });
