@@ -114,4 +114,4 @@ When a child completes, its collapsed card shows the full final response and a u
 
 The expanded view shows the handoff prompt and a chronological activity transcript. Tool calls use compact command-log rows with status, target, result counts, and elapsed time. Expansion adds grep options, full bash commands, recent bash output, and error output; successful read and search payloads stay hidden. Activity also includes streamed prose, model-provided thinking, retries, diagnostics, and final usage. Generated system instructions are not shown.
 
-The rendered activity transcript retains its latest 500 lines or 32 KB per child. The card reports omitted content when this limit is reached. Complete final messages remain in structured tool details even when the rendered activity is truncated.
+The rendered activity transcript retains its latest 1,000 lines or 64 KiB per child. The card reports omitted content when this limit is reached. Complete final messages remain in structured tool details even when the rendered activity is truncated.

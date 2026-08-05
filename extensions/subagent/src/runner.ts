@@ -9,8 +9,8 @@ import { toolsForCapability } from "./capabilities.ts";
 const SUBAGENT_SYSTEM_PROMPT = `You are an isolated subagent. Complete only the delegated task. You cannot ask the user questions. Return a concise, evidence-based result to the parent agent.`;
 const DEPTH_ENV = "PI_SUBAGENT_DEPTH";
 const COMMAND_ENV = "PI_SUBAGENT_PI_COMMAND";
-const MAX_ACTIVITY_LINES = 500;
-const MAX_ACTIVITY_BYTES = 32 * 1024;
+const MAX_ACTIVITY_LINES = 1000;
+const MAX_ACTIVITY_BYTES = 64 * 1024;
 const UPDATE_INTERVAL_MS = 50;
 
 export interface UsageStats extends Usage {
@@ -157,7 +157,7 @@ function boundTextActivity(result: SubagentRunResult, entry: SubagentTextActivit
 	result.activityTruncation.omittedBytes -= entry.omittedBytes ?? 0;
 	entry.omittedLines = 0;
 	entry.omittedBytes = 0;
-	const truncated = truncateTextTail(entry.text, MAX_ACTIVITY_LINES, 28 * 1024);
+	const truncated = truncateTextTail(entry.text, MAX_ACTIVITY_LINES, 60 * 1024);
 	entry.text = truncated.text;
 	entry.omittedLines = truncated.lines;
 	entry.omittedBytes = truncated.bytes;

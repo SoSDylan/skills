@@ -49,7 +49,7 @@ const text = prompt.includes("[LARGE]")
   : prompt.includes("[ENTRY_TAIL]")
     ? Array.from({ length: 100 }, (_, index) => "assistant tail " + (index + 1)).join("\\n")
   : prompt.includes("[LINES_MANY]")
-    ? Array.from({ length: 600 }, (_, index) => "activity line " + (index + 1)).join("\\n")
+    ? Array.from({ length: 1_200 }, (_, index) => "activity line " + (index + 1)).join("\\n")
   : prompt.includes("[LINES]")
     ? "line 1\\nline 2\\nline 3\\nline 4\\nline 5\\nline 6\\nline 7\\nline 8\\nline 9\\nline 10"
     : "child:" + prompt;
@@ -89,7 +89,7 @@ if (prompt.includes("[MANY_MESSAGES]")) {
 }
 if (prompt.includes("[STDERR_LARGE]")) console.error("diagnostic ".repeat(10000));
 if (prompt.includes("[ENTRY_TAIL]")) {
-  const toolText = Array.from({ length: 450 }, (_, index) => "tool tail " + (index + 1)).join("\\n");
+  const toolText = Array.from({ length: 1_450 }, (_, index) => "tool tail " + (index + 1)).join("\\n");
   console.log(JSON.stringify({ type: "tool_execution_start", toolCallId: "tail-tool", toolName: "read", args: { path: "tail.txt" } }));
   console.log(JSON.stringify({ type: "tool_execution_end", toolCallId: "tail-tool", toolName: "read", result: { content: [{ type: "text", text: toolText }] }, isError: false }));
 }
@@ -751,7 +751,7 @@ test("child activity is bounded and reports omitted transcript entries", async (
 		assert.ok(updateCount < 100, `expected coalesced updates, received ${updateCount}`);
 		assert.ok(child.activity.length < 600);
 		assert.ok(child.activityTruncation.omittedEntries > 0);
-		assert.ok(Buffer.byteLength(JSON.stringify(child.activity), "utf8") <= 32 * 1024);
+		assert.ok(Buffer.byteLength(JSON.stringify(child.activity), "utf8") <= 64 * 1024);
 		assert.ok(child.activity.some((entry: any) => entry.kind === "assistant" && /child:\[MANY\]/.test(entry.text)));
 	});
 });
@@ -773,7 +773,7 @@ test("raw child details stay bounded while the complete final response is preser
 		assert.equal(child.messages.length, 1);
 		assert.equal(child.messages[0].role, "assistant");
 		assert.match(result.content[0].text, /child:\[MANY_MESSAGES\] \[STDERR_LARGE\] inspect/);
-		assert.ok(Buffer.byteLength(child.stderr, "utf8") <= 32 * 1024);
+		assert.ok(Buffer.byteLength(child.stderr, "utf8") <= 64 * 1024);
 	});
 });
 
@@ -793,9 +793,9 @@ test("transcript retention keeps the latest lines from a partially evicted entry
 		const toolActivity = child.activity.find((entry: any) => entry.kind === "tool");
 
 		assert.ok(toolActivity, "expected the retained tail of the tool entry");
-		assert.match(JSON.stringify(toolActivity.result), /tool tail 450/);
+		assert.match(JSON.stringify(toolActivity.result), /tool tail 1450/);
 		assert.doesNotMatch(JSON.stringify(toolActivity.result), /tool tail 1(?:\\n|\\")/);
-		assert.ok(child.activityTruncation.omittedLines >= 50);
+		assert.ok(child.activityTruncation.omittedLines >= 450);
 	});
 });
 
@@ -832,7 +832,7 @@ test("large tool arguments and results are bounded with explicit transcript trun
 		);
 		const child = result.details.results[0];
 
-		assert.ok(Buffer.byteLength(JSON.stringify(child.activity), "utf8") <= 32 * 1024);
+		assert.ok(Buffer.byteLength(JSON.stringify(child.activity), "utf8") <= 64 * 1024);
 		assert.ok(child.activityTruncation.omittedBytes > 0);
 		assert.ok(child.activity.some((entry: any) => entry.kind === "tool" && entry.toolName === "write"));
 
@@ -848,7 +848,7 @@ test("large tool arguments and results are bounded with explicit transcript trun
 	});
 });
 
-test("a single large activity keeps its latest 500 lines and preserves the full final message", async () => {
+test("a single large activity keeps its latest 1,000 lines and preserves the full final message", async () => {
 	await withFakePi(async ({ root }) => {
 		const tool = loadExtension();
 		assert.ok(tool);
@@ -863,10 +863,10 @@ test("a single large activity keeps its latest 500 lines and preserves the full 
 		const child = result.details.results[0];
 		const assistant = child.activity.find((entry: any) => entry.kind === "assistant");
 
-		assert.ok(assistant.text.split("\n").length <= 500);
+		assert.ok(assistant.text.split("\n").length <= 1_000);
 		assert.doesNotMatch(assistant.text, /activity line 1(?:\n|$)/);
-		assert.match(assistant.text, /activity line 600/);
-		assert.ok(child.activityTruncation.omittedLines >= 100);
+		assert.match(assistant.text, /activity line 1200/);
+		assert.ok(child.activityTruncation.omittedLines >= 200);
 		assert.match(child.messages[0].content[0].text, /activity line 1\n/);
 	});
 });
