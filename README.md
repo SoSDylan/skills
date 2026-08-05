@@ -77,6 +77,10 @@ Reads and manages Linear issues, comments, labels, workflow states, projects, an
 
 Investigates a Zendesk ticket through read-only evidence gathering and produces a sourced resolution brief covering the user's problem, cause, supported fixes, and missing evidence.
 
+### `write-zendesk-response`
+
+Drafts concise, paste-ready client replies from established Zendesk support context.
+
 ## Pi extensions
 
 ### `browser-tools`
