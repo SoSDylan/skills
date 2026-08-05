@@ -305,7 +305,7 @@ test("collapsed rendering shows each completed child's full final response", asy
 		const rendered = component.render(100).join("\n");
 
 		assert.equal(tool.renderShell, "self");
-		assert.match(rendered, /Files · read-only · complete · \d/);
+		assert.match(rendered, /Files · read-only · complete · \d[^\n]*\n[^\S\r\n]*\n[^\S\r\n]*line 1/);
 		assert.match(rendered, /Tests · write · complete · \d/);
 		assert.ok(rendered.indexOf("Files") < rendered.indexOf("Tests"));
 		for (let line = 1; line <= 10; line += 1) assert.match(rendered, new RegExp(`line ${line}`));
@@ -368,15 +368,275 @@ test("expanded child cards show the prompt, full structured timeline, and usage 
 		assert.match(rendered, /Task · read-only · complete · \d/);
 		assert.match(rendered, /Prompt.*\[ACTIVITY\] inspect auth/s);
 		assert.match(rendered, /thinking: Checking assumptions/);
-		assert.match(rendered, /read/);
-		assert.match(rendered, /src\/auth\.ts/);
-		assert.match(rendered, /complete file/);
+		assert.match(rendered, /✓ read src\/auth\.ts · 1 line · \d+ms/);
+		assert.doesNotMatch(rendered, /complete file/);
+		assert.doesNotMatch(rendered, /args|result:/);
 		assert.match(rendered, /Retry 1\/3: rate limited/);
 		assert.match(rendered, /stderr: child diagnostic/);
 		assert.match(rendered, /1 turn.*↑10.*↓5.*\$0\.3000.*child-model/);
 		assert.doesNotMatch(rendered, /isolated subagent/i);
 	});
 });
+
+test("tool activity renders as compact command-log rows with tool-specific summaries", () => {
+	const tool = loadExtension();
+	assert.ok(tool?.renderResult);
+	initTheme();
+	const theme = {
+		fg: (_color: string, text: string) => text,
+		bg: (_color: string, text: string) => text,
+		bold: (text: string) => text,
+	};
+	const startedAt = Date.now() - 100;
+	const finishedAt = startedAt + 80;
+	const result = (text: string, details?: unknown) => ({
+		content: [{ type: "text", text }],
+		details,
+	});
+	const activity = [
+		{
+			id: "read",
+			kind: "tool",
+			toolName: "read",
+			args: { path: "src/auth.ts", offset: 10, limit: 5 },
+			result: result("one\ntwo\nthree\nfour\nfive"),
+			status: "complete",
+			timestamp: startedAt,
+			finishedAt,
+		},
+		{
+			id: "grep",
+			kind: "tool",
+			toolName: "grep",
+			args: { pattern: "createSession", path: "src", glob: "*.ts" },
+			result: result("src/a.ts:1: createSession()\nsrc/b.ts:2: createSession()"),
+			status: "complete",
+			timestamp: startedAt,
+			finishedAt,
+		},
+		{
+			id: "find",
+			kind: "tool",
+			toolName: "find",
+			args: { pattern: "*.test.ts", path: "src" },
+			result: result("src/a.test.ts\nsrc/b.test.ts"),
+			status: "complete",
+			timestamp: startedAt,
+			finishedAt,
+		},
+		{
+			id: "ls",
+			kind: "tool",
+			toolName: "ls",
+			args: { path: "src/auth" },
+			result: result("index.ts\nsession.ts"),
+			status: "complete",
+			timestamp: startedAt,
+			finishedAt,
+		},
+		{
+			id: "bash-ok",
+			kind: "tool",
+			toolName: "bash",
+			args: { command: "npm test -- auth" },
+			result: result("12 tests passed"),
+			status: "complete",
+			timestamp: startedAt,
+			finishedAt,
+		},
+		{
+			id: "edit",
+			kind: "tool",
+			toolName: "edit",
+			args: { path: "src/auth.ts", edits: [{ oldText: "a", newText: "b" }, { oldText: "c", newText: "d" }] },
+			result: result("Updated src/auth.ts", { patch: "--- a/src/auth.ts\n+++ b/src/auth.ts\n-a\n+b\n-c\n+d" }),
+			status: "complete",
+			timestamp: startedAt,
+			finishedAt,
+		},
+		{
+			id: "write",
+			kind: "tool",
+			toolName: "write",
+			args: { path: "src/generated.ts", content: "one\ntwo\nthree" },
+			result: result("Wrote src/generated.ts"),
+			status: "complete",
+			timestamp: startedAt,
+			finishedAt,
+		},
+		{
+			id: "bash-fail",
+			kind: "tool",
+			toolName: "bash",
+			args: { command: "npm test" },
+			result: result("FAIL auth.test.ts\nCommand exited with code 1"),
+			status: "failed",
+			isError: true,
+			timestamp: startedAt,
+			finishedAt,
+		},
+	];
+	const details = {
+		results: [
+			{
+				label: "Tool formats",
+				prompt: "Inspect the tools",
+				capability: "write",
+				status: "running",
+				exitCode: -1,
+				messages: [],
+				activity,
+				activityTruncation: { omittedEntries: 0, omittedLines: 0, omittedBytes: 0 },
+				stderr: "",
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					turns: 0,
+				},
+				aborted: false,
+			},
+		],
+	};
+	const toolResult = { content: [{ type: "text", text: "running" }], details };
+	const collapsed = tool.renderResult(toolResult, { expanded: false }, theme).render(180).join("\n");
+
+	assert.match(collapsed, /Tool formats · write · running · \d[^\n]*\n[^\S\r\n]*\n[^\S\r\n]*✓ read/);
+	assert.match(collapsed, /✓ read src\/auth\.ts:10-14 · 5 lines · 80ms/);
+	assert.match(collapsed, /✓ grep \/createSession\/ in src · 2 matches · 80ms/);
+	assert.match(collapsed, /✓ find \*\.test\.ts in src · 2 files · 80ms/);
+	assert.match(collapsed, /✓ list src\/auth · 2 entries · 80ms/);
+	assert.match(collapsed, /✓ \$ npm test -- auth · 80ms/);
+	assert.match(collapsed, /✓ edit src\/auth\.ts · 2 replacements · \+2 −2 · 80ms/);
+	assert.match(collapsed, /✓ write src\/generated\.ts · 3 lines · 80ms/);
+	assert.match(collapsed, /✗ \$ npm test · exit 1 · 80ms/);
+	assert.doesNotMatch(collapsed, /oldText|newText|12 tests passed|Command exited/);
+
+	const hiddenTranscript = tool
+		.renderResult(
+			{
+				content: [{ type: "text", text: "running" }],
+				details: {
+					results: [{ ...details.results[0], activity: [...activity, { ...activity[0], id: "read-extra" }] }],
+				},
+			},
+			{ expanded: false },
+			theme,
+		)
+		.render(180)
+		.join("\n");
+	assert.match(hiddenTranscript, /Tool formats · write · running · \d[^\n]*\n[^\S\r\n]*… earlier transcript content hidden/);
+
+	const expanded = tool.renderResult(toolResult, { expanded: true }, theme).render(180).join("\n");
+	assert.match(expanded, /command.*npm test -- auth/s);
+	assert.match(expanded, /output.*12 tests passed/s);
+	assert.match(expanded, /error output.*FAIL auth\.test\.ts/s);
+	assert.doesNotMatch(expanded, /one\ntwo\nthree\nfour\nfive/);
+
+	const narrowRows = tool.renderResult(toolResult, { expanded: false }, theme).render(40);
+	assert.equal(narrowRows.filter((line: string) => /[✓✗]/.test(line)).length, 8);
+});
+
+test("tool summaries handle context matches, empty results, notices, and images", () => {
+	const tool = loadExtension();
+	assert.ok(tool?.renderResult);
+	initTheme();
+	const theme = {
+		fg: (_color: string, text: string) => text,
+		bg: (_color: string, text: string) => text,
+		bold: (text: string) => text,
+	};
+	const timestamp = Date.now();
+	const toolResult = (content: unknown[], details?: unknown) => ({ content, details });
+	const activity = [
+		{
+			id: "grep-context",
+			kind: "tool",
+			toolName: "grep",
+			args: { pattern: "auth", path: "src", context: 1 },
+			result: toolResult([
+				{
+					type: "text",
+					text: "src/a.ts-9- before\nsrc/a.ts:10: auth()\nsrc/a.ts-11- after\nsrc/b.ts:20: auth()\n\n[2 matches limit reached]",
+				},
+			], { matchLimitReached: 2 }),
+			status: "complete",
+			timestamp,
+			finishedAt: timestamp,
+		},
+		{
+			id: "find-empty",
+			kind: "tool",
+			toolName: "find",
+			args: { pattern: "*.missing", path: "src" },
+			result: toolResult([{ type: "text", text: "No files found matching pattern" }]),
+			status: "complete",
+			timestamp,
+			finishedAt: timestamp,
+		},
+		{
+			id: "ls-empty",
+			kind: "tool",
+			toolName: "ls",
+			args: { path: "empty" },
+			result: toolResult([{ type: "text", text: "(empty directory)" }]),
+			status: "complete",
+			timestamp,
+			finishedAt: timestamp,
+		},
+		{
+			id: "read-image",
+			kind: "tool",
+			toolName: "read",
+			args: { path: "assets/logo.png" },
+			result: toolResult([
+				{ type: "text", text: "Read image file [image/png]" },
+				{ type: "image", data: "base64", mimeType: "image/png" },
+			]),
+			status: "complete",
+			timestamp,
+			finishedAt: timestamp,
+		},
+	] as any[];
+	const details = {
+		results: [
+			{
+				label: "Edge formats",
+				prompt: "Inspect edge formats",
+				capability: "read-only",
+				status: "running",
+				exitCode: -1,
+				messages: [],
+				activity,
+				activityTruncation: { omittedEntries: 0, omittedLines: 0, omittedBytes: 0 },
+				stderr: "",
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					turns: 0,
+				},
+				aborted: false,
+			},
+		],
+	};
+	const rendered = tool
+		.renderResult({ content: [{ type: "text", text: "running" }], details }, { expanded: false }, theme)
+		.render(160)
+		.join("\n");
+
+	assert.match(rendered, /grep \/auth\/ in src · 2 matches · 0ms · truncated/);
+	assert.match(rendered, /find \*\.missing in src · 0 files · 0ms/);
+	assert.match(rendered, /list empty · 0 entries · 0ms/);
+	assert.match(rendered, /read assets\/logo\.png · image · 0ms/);
+});
+
 
 test("child activity is bounded and reports omitted transcript entries", async () => {
 	await withFakePi(async ({ root }) => {
@@ -559,19 +819,19 @@ test("parent receives thinking, tool lifecycle, retry, and stderr activity", asy
 				(entry: any) => entry.kind === "thinking" && entry.text === "Checking assumptions" && entry.status === "complete",
 			),
 		);
-		assert.deepEqual(
-			activity.find((entry: any) => entry.kind === "tool"),
-			{
-				id: "tool-1",
-				kind: "tool",
-				toolName: "read",
-				args: { path: "src/auth.ts" },
-				result: { content: [{ type: "text", text: "complete file" }], details: { lines: 1 } },
-				status: "complete",
-				isError: false,
-				timestamp: activity.find((entry: any) => entry.kind === "tool").timestamp,
-			},
-		);
+		const toolActivity = activity.find((entry: any) => entry.kind === "tool");
+		assert.deepEqual(toolActivity, {
+			id: "tool-1",
+			kind: "tool",
+			toolName: "read",
+			args: { path: "src/auth.ts" },
+			result: { content: [{ type: "text", text: "complete file" }], details: { lines: 1 } },
+			status: "complete",
+			isError: false,
+			timestamp: toolActivity.timestamp,
+			finishedAt: toolActivity.finishedAt,
+		});
+		assert.ok(toolActivity.finishedAt >= toolActivity.timestamp);
 		assert.ok(activity.some((entry: any) => entry.kind === "lifecycle" && /retry 1\/3.*rate limited/i.test(entry.text)));
 		assert.ok(activity.some((entry: any) => entry.kind === "stderr" && /child diagnostic/.test(entry.text)));
 	});

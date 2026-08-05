@@ -50,6 +50,7 @@ export interface SubagentToolActivity extends ActivityBase {
 	args: unknown;
 	result?: unknown;
 	isError?: boolean;
+	finishedAt?: number;
 	argsOmittedLines?: number;
 	argsOmittedBytes?: number;
 	resultOmittedLines?: number;
@@ -386,6 +387,7 @@ function upsertToolActivity(
 		if (event.result !== undefined) setToolValue(result, existing, "result", event.result);
 		if (event.isError !== undefined) existing.isError = event.isError;
 		existing.status = status;
+		if (status !== "running") existing.finishedAt = Date.now();
 		boundToolActivity(result, existing);
 		trimActivity(result);
 		return;
@@ -672,6 +674,7 @@ export async function runSubagent(options: RunSubagentOptions): Promise<Subagent
 				for (const entry of result.activity) {
 					if (entry.status !== "running") continue;
 					entry.status = result.status === "complete" ? "complete" : "failed";
+					if (entry.kind === "tool") entry.finishedAt = result.finishedAt;
 				}
 				emitUpdate(true);
 				resolve();

@@ -80,6 +80,6 @@ Each child has a separate card. Cards remain in request order and show the label
 
 When a child completes, its collapsed card shows the full final response and a usage row with turns, token counts, cost, and model. While it runs, the card shows the latest eight transcript lines. Use the configured tool-expansion key, `Ctrl+O` by default, to expand or collapse all child cards together.
 
-The expanded view shows the handoff prompt and a chronological activity transcript. Activity includes streamed prose, model-provided thinking, tool arguments and results, retries, diagnostics, and final usage. Generated system instructions are not shown.
+The expanded view shows the handoff prompt and a chronological activity transcript. Tool calls use compact command-log rows with status, target, result counts, and elapsed time. Expansion adds grep options, full bash commands, recent bash output, and error output; successful read and search payloads stay hidden. Activity also includes streamed prose, model-provided thinking, retries, diagnostics, and final usage. Generated system instructions are not shown.
 
 The rendered activity transcript retains its latest 500 lines or 32 KB per child. The card reports omitted content when this limit is reached. Complete final messages remain in structured tool details even when the rendered activity is truncated.
