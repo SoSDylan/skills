@@ -15,6 +15,7 @@ const UPDATE_INTERVAL_MS = 50;
 
 export interface UsageStats extends Usage {
 	turns: number;
+	contextTokens?: number;
 }
 
 export function emptyUsageStats(): UsageStats {
@@ -78,7 +79,9 @@ export interface SubagentRunResult {
 	activityTruncation: ActivityTruncation;
 	stderr: string;
 	usage: UsageStats;
+	contextWindow?: number;
 	model?: string;
+	thinkingLevel?: string;
 	stopReason?: StopReason;
 	errorMessage?: string;
 	aborted: boolean;
@@ -91,6 +94,7 @@ export interface RunSubagentOptions {
 	cwd: string;
 	model?: { provider: string; id: string };
 	thinkingLevel?: string;
+	contextWindow?: number;
 	signal?: AbortSignal;
 	onUpdate?: (result: SubagentRunResult) => void;
 }
@@ -107,6 +111,9 @@ function initialResult(options: RunSubagentOptions): SubagentRunResult {
 		activityTruncation: { omittedEntries: 0, omittedLines: 0, omittedBytes: 0 },
 		stderr: "",
 		usage: emptyUsageStats(),
+		contextWindow: options.contextWindow,
+		model: options.model?.id,
+		thinkingLevel: options.thinkingLevel,
 		aborted: false,
 	};
 }
@@ -432,6 +439,9 @@ function addMessage(result: SubagentRunResult, message: Message): void {
 	result.usage.cacheWrite1h = (result.usage.cacheWrite1h ?? 0) + (message.usage.cacheWrite1h ?? 0);
 	result.usage.reasoning = (result.usage.reasoning ?? 0) + (message.usage.reasoning ?? 0);
 	result.usage.totalTokens += message.usage.totalTokens;
+	result.usage.contextTokens =
+		message.usage.totalTokens ||
+		message.usage.input + message.usage.output + message.usage.cacheRead + message.usage.cacheWrite;
 	result.usage.cost.input += message.usage.cost.input;
 	result.usage.cost.output += message.usage.cost.output;
 	result.usage.cost.cacheRead += message.usage.cost.cacheRead;

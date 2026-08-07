@@ -110,7 +110,7 @@ Use `/subagents list` to display the active profiles. Profile names may contain 
 
 Each child has a separate card. Cards remain in request order and show the label, capability, state, and elapsed time on one header line.
 
-When a child completes, its collapsed card shows the full final response and a usage row with turns, token counts, cost, and model. While it runs, the card shows the latest eight transcript lines. Use the configured tool-expansion key, `Ctrl+O` by default, to expand or collapse all child cards together.
+When a child completes, its collapsed card shows the full final response and a usage row with turns, token counts, cost, context utilization, model, and thinking level. While it runs, the card shows the latest eight transcript lines. Use the configured tool-expansion key, `Ctrl+O` by default, to expand or collapse all child cards together.
 
 The expanded view shows the handoff prompt and a chronological activity transcript. Tool calls use compact command-log rows with status, target, result counts, and elapsed time. Expansion adds grep options, full bash commands, recent bash output, and error output; successful read and search payloads stay hidden. Activity also includes streamed prose, model-provided thinking, retries, diagnostics, and final usage. Generated system instructions are not shown.
 

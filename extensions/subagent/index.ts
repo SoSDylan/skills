@@ -244,6 +244,17 @@ function resolveProfile(
 	return { model, thinkingLevel: profile.thinkingLevel ?? inheritedThinkingLevel };
 }
 
+function contextWindowForModel(
+	ctx: ExtensionContext,
+	model: { provider: string; id: string } | undefined,
+): number | undefined {
+	if (!model) return undefined;
+	const registered = ctx.modelRegistry.find(model.provider, model.id);
+	if (registered?.contextWindow) return registered.contextWindow;
+	if (ctx.model?.provider === model.provider && ctx.model.id === model.id) return ctx.model.contextWindow;
+	return undefined;
+}
+
 const SubagentParameters = Type.Object({
 	tasks: Type.Array(TaskSchema, {
 		description: `One or more independent handoff prompts to run in parallel (maximum ${MAX_PARALLEL_TASKS})`,
@@ -717,9 +728,31 @@ function renderCollapsedCards(results: SubagentRunResult[], theme: Theme): Conta
 	return container;
 }
 
+function formatTokens(count: number): string {
+	if (count < 1_000) return count.toString();
+	if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
+	if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
+	if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+	return `${Math.round(count / 1_000_000)}M`;
+}
+
 function formatUsage(result: SubagentRunResult): string {
 	const turns = `${result.usage.turns} ${result.usage.turns === 1 ? "turn" : "turns"}`;
-	return `${turns} ↑${result.usage.input} ↓${result.usage.output} $${result.usage.cost.total.toFixed(4)}${result.model ? ` ${result.model}` : ""}`;
+	const parts = [
+		turns,
+		`↑${result.usage.input}`,
+		`↓${result.usage.output}`,
+		`$${result.usage.cost.total.toFixed(4)}`,
+	];
+	if (result.contextWindow && result.contextWindow > 0) {
+		const percent = ((result.usage.contextTokens ?? 0) / result.contextWindow) * 100;
+		parts.push(`${percent.toFixed(1)}%/${formatTokens(result.contextWindow)}`);
+	}
+	if (result.model) {
+		parts.push(result.model);
+		if (result.thinkingLevel) parts.push(`• ${result.thinkingLevel}`);
+	}
+	return parts.join(" ");
 }
 
 function addUsageFooter(card: Box, result: SubagentRunResult, theme: Theme): void {
@@ -920,10 +953,11 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			const inheritedModel = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined;
 			const inheritedThinkingLevel = pi.getThinkingLevel();
 			const tasks = params.tasks;
-			const taskSettings = tasks.map((task) =>
-				resolveProfile(task.profile, inheritedModel, inheritedThinkingLevel),
-			);
-			const current: SubagentRunResult[] = tasks.map((task) => ({
+			const taskSettings = tasks.map((task) => {
+				const settings = resolveProfile(task.profile, inheritedModel, inheritedThinkingLevel);
+				return { ...settings, contextWindow: contextWindowForModel(ctx, settings.model) };
+			});
+			const current: SubagentRunResult[] = tasks.map((task, index) => ({
 				label: task.label,
 				prompt: task.prompt,
 				capability: (task.capability ?? "read-only") as Capability,
@@ -934,6 +968,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				activityTruncation: { omittedEntries: 0, omittedLines: 0, omittedBytes: 0 },
 				stderr: "",
 				usage: emptyUsageStats(),
+				contextWindow: taskSettings[index].contextWindow,
+				model: taskSettings[index].model?.id,
+				thinkingLevel: taskSettings[index].thinkingLevel,
 				aborted: false,
 			}));
 
@@ -966,6 +1003,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 					cwd: ctx.cwd,
 					model: taskSettings[index].model,
 					thinkingLevel: taskSettings[index].thinkingLevel,
+					contextWindow: taskSettings[index].contextWindow,
 					signal,
 					onUpdate: (partial) => {
 						current[index] = partial;

@@ -187,7 +187,13 @@ function loadExtension() {
 function makeContext(cwd: string) {
 	return {
 		cwd,
-		model: { provider: "test", id: "parent-model" },
+		model: { provider: "test", id: "parent-model", contextWindow: 272_000 },
+		modelRegistry: {
+			find: (provider: string, id: string) =>
+				provider === "test"
+					? { provider, id, contextWindow: id === "profile-model" ? 128_000 : 272_000 }
+					: undefined,
+		},
 	};
 }
 
@@ -214,6 +220,9 @@ test("parent can delegate one labeled task", async () => {
 		const result = await tool.execute("call-1", oneTask("Inspect src/auth.ts"), undefined, undefined, makeContext(root));
 		assert.match(result.content[0].text, /## Task — completed\n\nchild:Inspect src\/auth\.ts/);
 		assert.equal(result.details.results[0].capability, "read-only");
+		assert.equal(result.details.results[0].thinkingLevel, "high");
+		assert.equal(result.details.results[0].contextWindow, 272_000);
+		assert.equal(result.details.results[0].usage.contextTokens, 15);
 		assert.deepEqual(result.usage, {
 			input: 10,
 			output: 5,
@@ -271,6 +280,8 @@ test("a configured task profile selects its model and thinking level", async () 
 			makeContext(root),
 		);
 			assert.match(result.content[0].text, /child:inspect/);
+			assert.equal(result.details.results[0].thinkingLevel, "low");
+			assert.equal(result.details.results[0].contextWindow, 128_000);
 
 			const call = (await readLog(logPath)).find((entry) => entry.event === "start");
 			assert.ok(call);
@@ -403,7 +414,7 @@ test("collapsed rendering shows each completed child's full final response", asy
 		assert.ok(rendered.indexOf("Files") < rendered.indexOf("Tests"));
 		for (let line = 1; line <= 10; line += 1) assert.match(rendered, new RegExp(`line ${line}`));
 		assert.match(rendered, /Ctrl\+O|activity/i);
-		assert.match(rendered, /1 turn.*↑10.*↓5.*\$0\.3000.*child-model/);
+		assert.match(rendered, /1 turn ↑10 ↓5 \$0\.3000 0\.0%\/272k child-model • high/);
 	});
 });
 
@@ -466,7 +477,7 @@ test("expanded child cards show the prompt, full structured timeline, and usage 
 		assert.doesNotMatch(rendered, /args|result:/);
 		assert.match(rendered, /Retry 1\/3: rate limited/);
 		assert.match(rendered, /stderr: child diagnostic/);
-		assert.match(rendered, /1 turn.*↑10.*↓5.*\$0\.3000.*child-model/);
+		assert.match(rendered, /1 turn ↑10 ↓5 \$0\.3000 0\.0%\/272k child-model • high/);
 		assert.doesNotMatch(rendered, /isolated subagent/i);
 	});
 });
