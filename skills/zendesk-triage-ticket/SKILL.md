@@ -1,6 +1,6 @@
 ---
 name: zendesk-triage-ticket
-description: Investigate Zendesk tickets through read-only evidence gathering and produce a sourced resolution brief. Use when the user supplies a Zendesk ticket URL or explicit `Zendesk #ID` for investigation.
+description: Investigate a Zendesk support problem and produce a sourced resolution brief from complete ticket context.
 disable-model-invocation: true
 ---
 
@@ -10,27 +10,13 @@ Exhaust evidence before questioning the operator. Use read-only operations
 throughout and return recommendations as text; implementation and customer
 communication belong to separate skills.
 
-## 1. Resolve and fetch the ticket
+## 1. Load the ticket context
 
-Accept a Zendesk URL or an explicit reference such as `Zendesk #12345`. Treat a
-bare number as unspecified. A supplied URL must match the configured subdomain.
+Use `zendesk-cli` to resolve the supplied Zendesk ticket and fetch its complete
+read-only record. Stop and report the specific failure if the CLI does not
+return `ok: true`.
 
-The fetcher reads credentials from `.agents/zendesk.local.json` in the current
-repository:
-
-```json
-{"subdomain":"example","email":"agent@example.com","apiToken":"secret"}
-```
-
-Run it only when this file is ignored by Git and untracked. Keep its contents
-out of all output. Resolve this skill's directory to an absolute path, then run:
-
-```bash
-node "<zendesk-triage-ticket-skill-dir>/scripts/fetch-zendesk-ticket.mjs" <ticket-id>
-```
-
-This step is complete when the ticket, requester, every public and internal
-comment, and every attachment are fetched or have a specific recorded failure.
+This step is complete when the successful CLI result is loaded.
 
 ## 2. Account for all Zendesk evidence
 
@@ -136,3 +122,6 @@ Use this layout and omit optional sections only when empty:
 ## Evidence failures
 - <source and specific retrieval or inspection failure>
 ```
+
+This step is complete when the brief accounts for every material claim and
+evidence failure in the required layout.
