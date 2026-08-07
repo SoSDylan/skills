@@ -53,6 +53,11 @@ prompt guidance, capability profiles, and parallel execution.
 
 ## Skills
 
+### `implement`
+
+Implements work from a spec or set of tickets in one bounded implementation,
+verification, and stabilization pass.
+
 ### `distill-to-docs`
 
 Distills non-derivable session lessons into the appropriate project agent docs after your review.
