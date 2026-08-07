@@ -1,0 +1,30 @@
+{
+  "name": "pi-safe-read",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A Pi read override that rejects special files and enforces per-read deadlines",
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "verify": "npm run check && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.0",
+    "@types/node": "24.12.0",
+    "typebox": "1.1.38",
+    "typescript": "5.9.3"
+  }
+}

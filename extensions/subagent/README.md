@@ -99,7 +99,7 @@ Use `/subagents list` to display the active profiles. Profile names may contain 
 
 ## Execution behavior
 
-- Each child runs as an ephemeral `pi --mode json -p --no-session --no-extensions` process. It uses only the built-in tools selected by its capability.
+- Each child runs as an ephemeral `pi --mode json -p --no-session` process. Global Pi extensions remain active, so tool guards such as `safe-read` also protect child processes. The capability allowlist still controls which tools are active, and project-local resources follow Pi's normal trust rules.
 - The task list accepts up to eight items and runs at most four concurrently.
 - Parent cancellation terminates the delegation. Child cards are display-only and do not have separate cancellation controls.
 - A child cannot recursively delegate another subagent.

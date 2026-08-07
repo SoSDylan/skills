@@ -51,6 +51,18 @@ Run `/reload` in Pi after installation. See
 [`extensions/subagent/README.md`](extensions/subagent/README.md) for handoff
 prompt guidance, capability profiles, and parallel execution.
 
+### Safe read
+
+```bash
+npm install --prefix extensions/safe-read
+mkdir -p ~/.pi/agent/extensions
+ln -s "$(pwd)/extensions/safe-read" ~/.pi/agent/extensions/safe-read
+```
+
+Run `/reload` in Pi after installation. See
+[`extensions/safe-read/README.md`](extensions/safe-read/README.md) for behavior,
+timeout usage, and verification.
+
 ## Skills
 
 ### `implement`
@@ -99,6 +111,10 @@ Drives a visible Google Chrome session from Pi with Playwright, including naviga
 ### `subagent`
 
 Runs parent-generated handoff prompts in isolated Pi processes. It supports read-only or write-capable children, bounded parallel execution, and configurable task profiles. Use `/subagents` to add, edit, or remove model/thinking profiles.
+
+### `safe-read`
+
+Overrides Pi's built-in `read` tool. It rejects non-regular filesystem objects before reading and enforces a per-call timeout that defaults to 10 seconds while preserving built-in text, image, rendering, offset, and truncation behavior.
 
 ## License
 

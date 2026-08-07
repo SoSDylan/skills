@@ -508,7 +508,7 @@ export async function runSubagent(options: RunSubagentOptions): Promise<Subagent
 	const systemPromptPath = join(promptDirectory, "system.md");
 	await writeFile(systemPromptPath, SUBAGENT_SYSTEM_PROMPT, { encoding: "utf8", mode: 0o600 });
 
-	const args = ["--mode", "json", "-p", "--no-session", "--no-extensions"];
+	const args = ["--mode", "json", "-p", "--no-session"];
 	if (options.model) args.push("--model", `${options.model.provider}/${options.model.id}`);
 	if (options.thinkingLevel) args.push("--thinking", options.thinkingLevel);
 	args.push("--tools", toolsForCapability(options.capability).join(","));

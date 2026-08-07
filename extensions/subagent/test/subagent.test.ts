@@ -237,17 +237,17 @@ test("parent can delegate one labeled task", async () => {
 		assert.equal(call.cwd, await realpath(root));
 		assert.equal(call.depth, "1");
 		assert.match(call.systemPrompt, /isolated subagent/i);
-		assert.deepEqual(call.args.slice(0, 9), [
+		assert.deepEqual(call.args.slice(0, 8), [
 			"--mode",
 			"json",
 			"-p",
 			"--no-session",
-			"--no-extensions",
 			"--model",
 			"test/parent-model",
 			"--thinking",
 			"high",
 		]);
+		assert.ok(!call.args.includes("--no-extensions"));
 		assert.ok(call.args.includes("read,grep,find,ls"));
 		assert.ok(!call.args.includes("bash"));
 	} finally {
