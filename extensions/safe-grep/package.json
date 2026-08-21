@@ -1,0 +1,30 @@
+{
+  "name": "pi-safe-grep",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A Pi grep override that enforces per-search deadlines",
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "verify": "npm run check && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.0",
+    "@types/node": "24.12.0",
+    "typebox": "1.1.38",
+    "typescript": "5.9.3"
+  }
+}
