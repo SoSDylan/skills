@@ -63,6 +63,18 @@ Run `/reload` in Pi after installation. See
 [`extensions/safe-read/README.md`](extensions/safe-read/README.md) for behavior,
 timeout usage, and verification.
 
+### Safe grep
+
+```bash
+npm install --prefix extensions/safe-grep
+mkdir -p ~/.pi/agent/extensions
+ln -s "$(pwd)/extensions/safe-grep" ~/.pi/agent/extensions/safe-grep
+```
+
+Run `/reload` in Pi after installation. See
+[`extensions/safe-grep/README.md`](extensions/safe-grep/README.md) for timeout
+usage and verification.
+
 ## Skills
 
 ### `implement`
@@ -96,11 +108,11 @@ Fetches complete, read-only Zendesk ticket records, including requester details,
 
 ### `zendesk-triage-ticket`
 
-Investigates loaded Zendesk ticket evidence and produces a sourced resolution brief covering the user's problem, cause, supported fixes, and missing evidence.
+Turns a Zendesk ticket into customer-need analysis, a supported response draft, and approval-gated issue-tracker follow-up.
 
 ### `write-zendesk-response`
 
-Drafts concise, paste-ready client replies from established Zendesk support context.
+Drafts concise, paste-ready customer replies from established Zendesk support context, either directly or within ticket triage.
 
 ## Pi extensions
 
@@ -115,6 +127,10 @@ Runs parent-generated handoff prompts in isolated Pi processes. It supports read
 ### `safe-read`
 
 Overrides Pi's built-in `read` tool. It rejects non-regular filesystem objects before reading and enforces a per-call timeout that defaults to 10 seconds while preserving built-in text, image, rendering, offset, and truncation behavior.
+
+### `safe-grep`
+
+Overrides Pi's built-in `grep` tool. It enforces a per-call timeout that defaults to 10 seconds while preserving built-in search options, rendering, result shape, and truncation behavior.
 
 ## License
 
