@@ -1,7 +1,6 @@
 ---
 name: write-zendesk-response
-description: Draft paste-ready client replies from established Zendesk support context. Use when the user asks to write or revise a response email to a customer.
-disable-model-invocation: true
+description: Draft paste-ready customer replies from established Zendesk support context. Use for direct reply requests and Zendesk triage response drafting.
 ---
 
 # Write a Zendesk Response
@@ -12,14 +11,22 @@ Write a warm, plainspoken reply for the client. Return a draft; a separate expli
 
 Use the latest established facts from the conversation and supplied ticket context. Identify:
 
-- the client's first name, when available
+- the customer's first name, when available
+- their goal and why it matters to them
+- their latest question or request
 - the customer-visible problem
 - the current status
-- what the client should do next
+- what the operator and customer should do next
 
-Treat the operator's latest status update as authoritative. Ask one question when a missing status or next action would materially change the reply.
+Treat the operator's latest status update as authoritative. Use supported
+inferences to acknowledge the customer's goal or impact, but keep uncertain
+technical and financial claims out. Ask the operator one question only when a
+missing status would make every honest draft misleading; otherwise draft the
+current truth.
 
-This step is complete when every claim planned for the response is supported by the available context.
+This step is complete when the response can address the customer's latest
+request and every factual claim planned for it is supported by the available
+context.
 
 ## 2. Match the status
 
@@ -39,13 +46,19 @@ This step is complete when the wording communicates the exact current status wit
 Use this default shape:
 
 1. `Hi <first name>,`
-2. A brief acknowledgement when appropriate.
-3. The update in the first substantive sentence.
-4. One clear next action.
-5. An invitation to reply if the problem continues.
+2. A brief acknowledgement of the customer's goal or impact.
+3. A direct answer to their latest request.
+4. The current status in customer-visible terms.
+5. One clear next action.
+6. An invitation to reply when useful.
 
-Use contractions, familiar words, short paragraphs, and a casual professional tone. Keep routine replies between 40 and 100 words. Include a subject or sign-off only when requested or established by the conversation.
+Use contractions, familiar words, short paragraphs, and a casual professional
+tone. Keep routine replies between 40 and 120 words. Include a subject or sign-off
+only when requested or established by the conversation.
 
-Return only the paste-ready response text.
+When invoked directly, return only the paste-ready response text. When a parent
+workflow delegates response drafting, return the draft to that workflow and let
+it continue.
 
-This step is complete when the reply is concise, human, factually supported, and ready to paste into Zendesk.
+This step is complete when the reply is concise, human, factually supported, and
+ready to paste into Zendesk.
