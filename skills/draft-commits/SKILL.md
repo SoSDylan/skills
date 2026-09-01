@@ -1,12 +1,29 @@
 ---
 name: draft-commits
-description: Draft an approval-gated commit plan that matches the repository's history. Always use before creating a Git commit, including when another skill says to commit or completed work warrants committing.
+description: Draft and apply a repository-matched commit plan before creating Git commits. Always use before creating a Git commit. Require user approval unless a directly invoked workflow explicitly pre-authorizes commits for its own changes.
 ---
 
 # Draft Commits
 
-Turn uncommitted work into an approval-gated commit plan, then apply that exact
-plan only after the user approves it.
+Turn uncommitted work into a complete commit plan, authorize it under the
+applicable mode, then apply that exact plan.
+
+## Authorization modes
+
+Use **approval-gated mode** by default.
+
+Use **pre-authorized mode** only when all of these conditions are true:
+
+- the user directly invoked the calling workflow
+- that workflow's documented contract states that invocation authorizes commits
+  for its own changes without a second confirmation
+- the workflow supplies the working-tree baseline captured before it made changes
+  and a manifest binding each run-owned path to its exact final status and content
+
+Pre-authorization covers only the bound content in manifest paths that were clean
+at the baseline. Route baseline changes, unrelated changes, ambiguous untracked
+files, and unresolved branch choices through approval-gated mode. Record the
+mode and its authorization source in the plan.
 
 ## 1. Inspect conventions and changes
 
@@ -31,8 +48,11 @@ git diff --stat
 git branch --show-current
 ```
 
-Read untracked files needed to understand their purpose and mark their inclusion
-as requiring the user's decision. If there are no changes, stop and report that.
+Read untracked files needed to understand their purpose. In approval-gated mode,
+mark their inclusion as requiring the user's decision. In pre-authorized mode,
+include them only when they were absent from the supplied baseline and were
+produced by the calling workflow; otherwise mark them as awaiting a decision. If
+there are no changes, stop and report that.
 
 This step is complete when the repository's title and branch conventions are
 known and every changed path has been inspected and classified as staged,
@@ -63,61 +83,87 @@ choose its name.
 This step is complete when the branch is explicit and every changed path is
 accounted for exactly once.
 
-## 3. Present the approval artifact
+## 3. Present the authorization artifact
 
 Present the complete plan in a reviewable form:
 
 ```text
+Authorization: approval required
+# or: pre-authorized by direct invocation of <workflow>
 Suggested branch: use current branch <name>
 # or: create <proposed-name>
 
 Commit 1 — <title>
   <what changes and why>
   M  path/to/file — staged
-  A  path/to/other — untracked, include if approved
+  A  path/to/other — untracked, include if authorized
 
 Excluded:
   path/to/file — <reason>
 ```
 
-Ask the user to review the branch, grouping, titles, inclusions, and exclusions.
-An unambiguous confirmation made in direct response to this complete plan is
-approval to apply it.
+In approval-gated mode, ask the user to review the branch, grouping, titles,
+inclusions, and exclusions. An unambiguous confirmation made in direct response
+to this complete plan authorizes it.
 
-## 4. Revise until approved
+Bind the artifact to the exact status and content inspected for every included
+path. In pre-authorized mode, verify that this content is within the authorized
+scope and that the plan contains no unresolved decision. Present the artifact
+and continue without pausing for a second confirmation. If either condition
+fails, use approval-gated mode for the complete plan.
 
-Apply requested regrouping, renaming, inclusion, exclusion, splitting, or
-merging to the plan. Present the complete revised plan again; each revision
-replaces the previous approval artifact and requires fresh approval.
+This step is complete when the content-bound artifact is presented and either
+awaits explicit approval or satisfies every pre-authorization condition.
 
-Questions that leave the plan unchanged do not create a new revision. This step
-is complete only when the user approves the current complete plan.
+## 4. Resolve plan authorization
 
-## 5. Apply the approved plan
+In approval-gated mode, apply requested regrouping, renaming, inclusion,
+exclusion, splitting, or merging. Present the complete revised plan again; each
+revision replaces the previous artifact and requires fresh approval. Questions
+that leave the plan unchanged do not create a revision.
 
-Re-check the current branch and working tree before changing either. If the
-branch or changed paths differ from the approved plan, stop and present an
-updated plan for approval.
+In pre-authorized mode, regrouping, title, or branch revisions remain authorized
+only when the exact included status and content stay unchanged and no unresolved
+user decision remains. Route every content or status revision through
+approval-gated mode.
 
-Create the approved branch when required, then stage only the exact paths in
-each approved commit and commit them in order:
+This step is complete when the current complete plan is either explicitly
+approved or validly pre-authorized.
 
-```bash
-git add <exact approved paths>
-git commit -m "<single-line approved title>"
-```
+## 5. Apply the authorized plan
 
-Use one `-m` value and no commit body. If staging, a hook, or a commit fails,
-stop and report the resulting repository state so the user can choose the next
-action.
+Re-check the current branch, path statuses, and exact content before changing
+either the branch or index. If any value differs from the authorized artifact,
+present the updated complete plan in approval-gated mode.
 
-After each successful commit, report its hash and title. Finish by showing the
-new commits and all remaining changes:
+Create the authorized branch when required. Apply each commit from an isolated
+temporary index so existing staged changes cannot enter it:
+
+1. Record the current `HEAD` as the parent. Create a temporary index, initialize
+   it from that parent, and stage the commit's exact paths into it.
+2. Inspect the temporary index's complete `--name-status` and `--binary` cached
+   diff. Continue only when both match the artifact exactly.
+3. Commit with the temporary index by setting `GIT_INDEX_FILE` for `git commit`.
+   Use one `-m` value and no commit body.
+4. Record the created hash and verify its complete paths and content against the
+   artifact before changing the real index.
+5. On success, run `git reset -q HEAD -- <exact authorized paths>` without
+   `GIT_INDEX_FILE`, then remove the temporary index. This refreshes only the
+   committed paths while preserving unrelated staged changes.
+
+If a hook changes the commit or post-commit verification cannot complete,
+atomically restore the branch with
+`git update-ref HEAD <parent-hash> <created-hash>`, remove the temporary index,
+and stop. If staging, a hook, or a commit fails, remove the temporary index and
+report the resulting repository state so the user can choose the next action.
+
+After each verified commit, report its hash and title. Finish by showing the new
+commits and all remaining changes:
 
 ```bash
 git log -<number-of-created-commits> --oneline
 git status --short
 ```
 
-The workflow is complete when every approved commit exists on the approved
+The workflow is complete when every authorized commit exists on the authorized
 branch and every remaining change is visible in the final status.
