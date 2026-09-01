@@ -88,7 +88,8 @@ Distills non-derivable session lessons into the appropriate project agent docs a
 
 ### `draft-commits`
 
-Groups uncommitted changes and drafts commit titles that match the repository's existing style.
+Groups uncommitted changes into repository-matched commits, with user approval
+by default and scoped pre-authorization for directly invoked workflows.
 
 ### `keychain-env`
 
@@ -113,6 +114,11 @@ Turns a Zendesk ticket into customer-need analysis, a supported response draft, 
 ### `write-zendesk-response`
 
 Drafts concise, paste-ready customer replies from established Zendesk support context, either directly or within ticket triage.
+
+### `write-help-docs`
+
+Generates the exact help article set for a supplied collection directory from verified
+application code. Invoke it as `/skill:write-help-docs <path>`.
 
 ## Pi extensions
 
