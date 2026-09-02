@@ -77,6 +77,12 @@ usage and verification.
 
 ## Skills
 
+### `mac-storage-cleanup`
+
+User-invoked with `/skill:mac-storage-cleanup`. Audits physical macOS disk
+usage, presents disjoint cleanup candidates, and runs only an explicitly
+approved cleanup plan for selected candidate IDs.
+
 ### `implement`
 
 Implements work from a spec or set of tickets in one bounded implementation,
