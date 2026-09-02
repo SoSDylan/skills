@@ -16,21 +16,22 @@ Treat the supplied directory as `<help-dir>`. Resolve a relative path from the c
 
 ## Sources and scope
 
-- `<help-dir>/README.md` defines the complete article set, suggested sections, and documented routes.
+- `<help-dir>/README.md` defines the complete article set, suggested investigation areas, and documented routes. Suggested sections are not mandatory headings; include only relevant, verified content.
 - Generate only the listed articles. Write one Markdown file per article in `<help-dir>`.
 - Normalize a title or filename stem by lowercasing its alphanumeric words and joining them with hyphens. Preserve an existing filename only when its normalized stem equals the normalized article title. Block target mapping if multiple files match. Otherwise, use the normalized article title as the filename.
-- Use pre-existing Markdown articles in `<help-dir>` only to derive their shared structure and layout. Treat their product claims as unverified.
-- If `<help-dir>` has no pre-existing article, use this default layout: H1 title, short introduction, **Before you start** when prerequisites exist, task sections, **What happens next** only for necessary consequences, and **Troubleshooting**.
+- Use pre-existing Markdown articles in `<help-dir>` to derive their shared structure and layout. The applicable product reference overrides conflicting editorial patterns. Do not transfer product claims between articles.
+- When the user identifies existing content as approved, preserve its active-code-supported substantive meaning and article-specific details. Revise its wording and organization to meet the writing rules. If active code contradicts a substantive approved claim, treat the conflict as a material ambiguity. Approval does not make the article product evidence for another topic.
+- If `<help-dir>` has no pre-existing article, use this default layout: H1 title, short introduction, **Before you start** when prerequisites exist, task sections, **What happens next** only for necessary consequences, and **Troubleshooting** when verified recovery content exists.
 - Use the current codebase as the source of truth for all product behavior.
 - Treat browser observations as supporting evidence, not as a replacement for code evidence.
-
-For CrewTraka Intercom documentation, link every support direction only to [CrewTraka support](https://www.crewtraka.com/support). Exclude support email addresses and phone numbers. This rule overrides reference articles. For another product, follow its explicit support policy. Omit support directions when no policy exists.
+- **CrewTraka:** Read and apply [`references/crewtraka-help-style.md`](references/crewtraka-help-style.md) to every article. It is authoritative for CrewTraka editorial style and support directions.
+- **Other products:** Follow the explicit product support policy. Omit support directions when no policy exists.
 
 ## 1. Fix the target set
 
-Read `<help-dir>/README.md`, list `<help-dir>`, and inspect the structure reference. Record a concise summary of the shared structure and layout. Map every listed article to exactly one output file. Create a temporary backup of each existing output file and record its SHA-256 hash. Record which outputs did not exist.
+Read `<help-dir>/README.md`, list `<help-dir>`, and read the applicable product reference. Inspect existing mapped outputs for shared structure and layout. Record a concise summary of the structure, layout, product rules, and any user-approved content supplied for the run. Map every listed article to exactly one output file. Create a temporary backup of each existing output file and record its SHA-256 hash. Record which outputs did not exist.
 
-This step is complete when every listed article has one output path and no unlisted article is in scope.
+This step is complete when every listed article has one output path, no unlisted article is in scope, and every applicable reference and approved-content baseline is recorded.
 
 ## 2. Assign article owners
 
@@ -38,17 +39,19 @@ Dispatch one write-capable subagent for each article. An owner handles exactly o
 
 Each handoff must include:
 
-- application repository root;
-- `<help-dir>` and its `README.md` article entry;
-- article title, suggested sections, and output path;
-- the pre-run structure and layout summary, with its structure-only boundary;
+- application repository root and applicable repository instructions;
+- `<help-dir>`, documented collection routes, and its `README.md` article entry;
+- article title, suggested investigation areas, and output path;
+- the pre-run structure, layout, product-rule, and approved-content summary, with each source's boundary;
 - the code-evidence requirements;
 - all article rules and the ASD-STE100 checklist at [`references/asd-ste100-checklist.md`](references/asd-ste100-checklist.md);
-- the applicable support policy;
+- the applicable product reference and support policy;
 - the ambiguity gate; and
 - the required owner report.
 
 A subagent has no parent conversation. Make each handoff self-contained.
+
+This step is complete when every mapped article has exactly one owner, each owner is restricted to one output file, and every handoff contains all required sources, rules, evidence requirements, gates, and report requirements.
 
 ## 3. Build the evidence map before drafting
 
@@ -88,20 +91,14 @@ This step is complete when every blocked file is unchanged and all blocking ques
 
 ## Article rules
 
-- Follow the reference structure and layout. Do not copy its product claims.
-- Read and apply every rule in [`references/asd-ste100-checklist.md`](references/asd-ste100-checklist.md).
-- Use the exact interface labels from the active implementation.
-- Use numbered steps for all procedures. Keep prerequisite bullets declarative.
-- Write each step at the user-task level. Combine obvious form entry into one step.
-- Mention an individual field only when it needs an explanation, has validation or formatting requirements, changes available fields or actions, affects a later step, or is necessary to understand the workflow.
-- Include only necessary user actions. Do not turn automatic system work into a user step.
-- End each procedure with the final action that the user must take.
-- Put necessary outcomes outside the numbered procedure. Include a confirmation message only when it contains required information, requires another action, or is the only reliable completion indicator for a long-running process.
-- Omit routine success messages and routine visual confirmations.
-- Include troubleshooting for code-reachable failure cases and common user problems that follow from verified states or validation. Give only recovery actions that the code supports. Describe a problem as common only when support or analytics evidence establishes frequency.
-- Keep implementation details and code citations out of the customer article unless the user needs the detail to complete the task.
+- Follow the source precedence in **Sources and scope**. Preserve approved substantive meaning only within its own article. Do not transfer product claims between topics.
+- Read and apply every rule in [`references/asd-ste100-checklist.md`](references/asd-ste100-checklist.md) and the applicable product reference.
+- Include a detail only when it helps the reader prepare, choose, complete, verify, understand a necessary consequence, or recover from the task.
+- Group routine fields, choices, and visible values at the user-task level. Name an item only when it needs an explanation, has validation or formatting requirements, changes available fields or actions, affects a later step, or is necessary to understand or recover from the workflow.
+- Include troubleshooting for code-reachable failure cases and user problems that follow from verified states or validation. Give only recovery actions that the code supports. Describe a problem as common only when support or analytics evidence establishes frequency.
+- Keep implementation details and code citations out of the customer article unless the reader needs the detail to complete the task.
 
-After drafting, the owner must run a separate ASD-STE100 and task-level edit pass on its article.
+After drafting, the owner must run separate ASD-STE100, product-style, and task-level edit passes on its article.
 
 ## Owner report
 
@@ -110,19 +107,23 @@ Require each owner to return:
 - output path and status: `written` or `blocked`;
 - concise `path:line` evidence for every substantive product claim and documented workflow branch;
 - unresolved questions, if any; and
-- confirmation that it applied the article rules and support policy.
+- confirmation that it applied the article rules, ASD-STE100 checklist, product reference, and support policy.
 
 Keep the evidence in the report, not in the customer article.
 
-## 5. Verify each article
+## 5. Review, update, and verify once
 
-After owners finish, dispatch one read-only verifier per written article. A verifier audits exactly one article against the active code and its owner evidence. It must flag every unsupported behavior, incorrect label, missing workflow branch, invalid recovery action, and article-rule violation with article and source lines.
+Use one bounded review-update-verification cycle per written article:
 
-Send accepted findings to a write-capable correction subagent that handles only the affected article. Do not expand article scope. Run the article verifier again after correction. Repeat the correction and verification cycle until the article passes or becomes blocked.
+1. Dispatch one read-only verifier. The verifier audits exactly one article against the active code, owner evidence, ASD-STE100 checklist, and applicable product reference. It must flag every unsupported behavior, incorrect label, missing workflow branch, invalid recovery action, and rule violation with article and source lines.
+2. Triage the first-verification findings once. Send accepted findings to one write-capable correction subagent that handles only the affected article. The correction subagent must address all accepted findings, keep article scope fixed, and run factual, ASD-STE100, product-style, and task-level self-audits on the complete article. An article with no accepted findings receives no correction pass.
+3. Dispatch one final read-only verifier for every written article after the correction phase. The final verifier audits the complete article against the same sources and returns `PASS`, `FAIL`, or `AMBIGUITY` with article and source lines.
 
-If verification exposes a material ambiguity, restore an existing output from its temporary backup or remove a new output. Confirm the restored file hash when applicable. Add the question to the consolidated list and wait for the user before you resume that article.
+Each article receives two verification passes and no more than one correction pass. Do not start another correction pass after final verification. Record every final-verification finding for the user.
 
-This step is complete when each written article passes a factual and procedural audit.
+If either verifier or the correction subagent exposes a material ambiguity, restore an existing output from its temporary backup or remove a new output. Confirm the restored file hash when applicable. Add the question to the consolidated list and wait for the user before you resume that article in a later run.
+
+This step is complete when each written article has two verification passes, no more than one correction pass, and a recorded final-verification result.
 
 ## 6. Run the collection audit
 
@@ -130,16 +131,19 @@ Confirm that:
 
 - every README article has exactly one Markdown file;
 - no unlisted article was generated;
+- approved content was preserved or a code conflict was blocked;
 - every documented behavior has active-code evidence;
-- every procedure contains only necessary user actions and ends with the final user action;
-- every field detail meets at least one field-mention criterion;
+- every detail passes the relevance gate;
+- every named field, choice, or visible value meets at least one item-mention criterion;
 - troubleshooting contains only verified cases and recovery actions;
-- all support directions follow the applicable support policy;
-- CrewTraka articles contain no support email address or phone number;
+- every written article received an initial and final verification;
+- every article with accepted initial findings received no more than one correction pass;
+- every accepted initial finding was applied or reported;
+- every final-verification finding is recorded for the user;
 - every blocked existing file retains its pre-run hash;
 - every blocked new output remains absent; and
 - all unresolved questions are reported.
 
-Scan all target files for URLs, support references, phone numbers, and email addresses. Read every final article in full after the scan.
+Run every scan required by the applicable product reference and support policy. Read every final article in full after the scans. The collection audit must not start another article review or correction pass. Report newly found issues as residual findings.
 
-Report the output files, audit result, and consolidated unresolved questions. Remove the temporary backup only after all articles pass. If the collection is blocked, keep the backup and report its path. The work is complete only when every audit check passes and no unresolved questions remain. Otherwise, report the collection as blocked and list every unresolved question.
+Report the output files, audit result, accepted corrections, complete final-verification findings, residual findings, and consolidated unresolved questions. Remove the temporary backup only when the collection is not blocked. If the collection is blocked, keep any backup and report its path. The run is complete when the bounded review-update-verification cycle and collection checks finish. Report the collection as blocked only for a material ambiguity, a missing output, a failed restoration, or an accepted finding that the correction subagent could not resolve safely.
