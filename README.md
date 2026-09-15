@@ -88,6 +88,11 @@ approved cleanup plan for selected candidate IDs.
 Implements work from a spec or set of tickets in one bounded implementation,
 verification, and stabilization pass.
 
+### `implement-spec`
+
+Implements a specification as one PR with parallel ticket agents and automatically
+commits workflow-owned changes.
+
 ### `distill-to-docs`
 
 Distills non-derivable session lessons into the appropriate project agent docs after your review.
@@ -117,9 +122,13 @@ Fetches complete, read-only Zendesk ticket records, including requester details,
 
 Turns a Zendesk ticket into customer-need analysis, a supported response draft, and approval-gated issue-tracker follow-up.
 
+### `write-reply`
+
+Drafts short, casual-professional replies to emails or messages. Supplies the shared tone and format for other drafting workflows.
+
 ### `write-zendesk-response`
 
-Drafts concise, paste-ready customer replies from established Zendesk support context, either directly or within ticket triage.
+Drafts customer replies from established Zendesk support context, using `write-reply` for tone and format.
 
 ### `write-help-docs`
 
