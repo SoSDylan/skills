@@ -1,6 +1,6 @@
 ---
 name: implement-spec
-description: "Implement a specification as one PR with parallel ticket agents and automatically commit workflow-owned changes."
+description: "Implement a specification as one PR with sequential ticket agents and automatically commit workflow-owned changes."
 disable-model-invocation: true
 ---
 
@@ -12,11 +12,27 @@ Direct invocation of this skill pre-authorizes commit plans for exact changes
 produced by this workflow, including work delegated to its subagents. Existing,
 unrelated, or ambiguous changes remain approval-gated.
 
-The tickets are not a list of steps. They are a **task graph** with blocking relationships between them. This means there is always a **frontier** of tickets which are ready to be grabbed.
+The tickets form a **task graph** with blocking relationships. The **frontier**
+contains unfinished tickets whose dependencies are complete. Select one ticket
+at a time from this frontier.
 
 Communication to and from subagents should be sparse. Communicate primarily through **context pointers**: to the spec, tickets, research notes, and previous commits. Don't duplicate information already available via pointers.
 
-**Implementer subagents** should be run in the background where possible for **maximum concurrency**.
+## Execution model
+
+Use one PR branch and one shared worktree for the entire workflow. Each ticket
+gets a fresh **implementer subagent**, run sequentially. Implementers and the
+final correction subagent work directly on that branch in the same worktree,
+appending ordinary commits to a linear history.
+
+The active implementer is the sole repository writer, including file edits,
+index changes, and commits. The parent waits for it to finish before dispatching
+the next implementer or changing repository state.
+
+Exploration and review subagents may run in parallel with each other, with
+read-only access to the repository. Save shared research notes outside the
+repository. Pause implementation during review so reviewers inspect a stable,
+committed snapshot.
 
 ## Commit protocol
 
@@ -77,32 +93,44 @@ do not copy the protocol into handoffs.
 
 ## Steps
 
-1. Read the spec and tickets. Read enough to understand the task graph.
+1. Read the spec and tickets. Identify dependencies and the initial frontier.
 
-2. (optional) Use an **exploration subagent** to conduct any exploration required by the tickets - relevant codebase files or external documentation. Ensure the exploration subagent can save files - it should save its markdown notes in a directory outside the repo, accessible by all future subagents. This lets **implementer subagents** focus on implementation rather than exploration.
+2. Optionally use **exploration subagents** to inspect relevant code or external
+   documentation under the execution model above. Make their research notes
+   accessible to subsequent implementers through context pointers.
 
-3. Create a branch, and a draft PR. The PR should be marked as 'closing' the spec issue and tickets.
+3. Create the PR branch in the current worktree and a draft PR. Record the branch
+   name and absolute worktree path for all implementation handoffs. The PR should
+   be marked as 'closing' the spec issue and tickets.
 
-4. Use **implementer subagents** to implement each ticket. Each implementer
-subagent should work in its own worktree, on its own branch. Its handoff must
-point to the bounded implementation pass, include the commit protocol, define
-its exact ticket scope, and require the resulting authorized commit hashes.
+4. If unfinished tickets remain but the frontier is empty, report the dependency
+   blocker and stop. Otherwise, select one ticket from the frontier and dispatch
+   a fresh **implementer subagent**. Its handoff must specify the PR branch and
+   shared worktree, define its exact ticket scope, point to the bounded
+   implementation pass, include the commit protocol, and require authorized
+   commit hashes and a report of remaining worktree changes. Direct it to use
+   the existing branch and worktree throughout its work.
 
-5. Once an **implementer subagent** completes, merge its work to the PR branch
-with a **merger subagent**. The merger must follow the commit protocol for each
-integration commit and report the resulting PR-branch hashes.
+5. Wait for the implementer to finish. Before marking the ticket complete or
+   starting another, confirm that its checklist is satisfied, applicable checks
+   pass apart from documented pre-existing failures, its authorized commits are
+   on the PR branch, and none of its in-scope changes remain uncommitted.
+   Preserve unrelated baseline changes. If any completion condition is unmet,
+   pause and report the blocker rather than dispatching another writer.
+   Otherwise, mark the ticket complete and refresh the frontier. Repeat from
+   step 4 until all tickets are complete.
 
-6. If this changes the **frontier** of available tickets, kick off more **implementer subagents** to work on the new tickets. This allows for maximum concurrency.
+6. Once all tickets are complete, run the applicable integrated checks once,
+   then run /code-review on the PR branch. Triage its findings before changing
+   code. In one **implementer subagent**, fix findings caused by this
+   implementation that violate the spec, repository standards, or correctness.
+   Report pre-existing issues, later-ticket work, and optional improvements
+   without implementing them. Use the same handoff requirements and completion
+   gate as steps 4–5, with the accepted findings as its scope, on the same PR
+   branch and shared worktree. Rerun checks affected by its corrections. End
+   stabilization after this single correction pass; report remaining findings
+   without another review.
 
-7. Once all tickets are complete, run the applicable integrated checks once,
-then run /code-review on the PR branch. Triage its findings before changing code.
-In one **implementer subagent**, fix findings caused by this implementation that
-violate the spec, repository standards, or correctness. Report pre-existing
-issues, later-ticket work, and optional improvements without implementing them.
-Its handoff must point to the bounded implementation pass and include the commit
-protocol. Rerun checks affected by its corrections. End stabilization after this
-single correction pass; report remaining findings without another review.
-
-8. Mark the PR as ready for review.
-
-9. Clean up all **implementer subagent** worktrees.
+7. Mark the PR as ready for review only when all required behaviour is
+   implemented and no workflow-caused check failures or blocking review findings
+   remain. Otherwise, leave it in draft and report the blockers.

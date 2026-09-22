@@ -90,8 +90,9 @@ verification, and stabilization pass.
 
 ### `implement-spec`
 
-Implements a specification as one PR with parallel ticket agents and automatically
-commits workflow-owned changes.
+Implements a specification as one PR with sequential ticket agents on one shared
+branch and worktree, automatically committing workflow-owned changes in a linear
+history.
 
 ### `distill-to-docs`
 
@@ -143,7 +144,7 @@ Drives a visible Google Chrome session from Pi with Playwright, including naviga
 
 ### `subagent`
 
-Runs parent-generated handoff prompts in isolated Pi processes. It supports read-only or write-capable children, bounded parallel execution, and configurable task profiles. Use `/subagents` to add, edit, or remove model/thinking profiles.
+Runs parent-generated handoff prompts in isolated Pi processes. It supports read-only or write-capable children and bounded parallel execution. All children inherit the parent's current model and thinking level.
 
 ### `safe-read`
 
