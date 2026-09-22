@@ -46,15 +46,15 @@ function repositoryRoot() {
   }
 }
 
-function validateConfig(config) {
+function validateConfig(config, source) {
   for (const key of ["subdomain", "email", "apiToken"]) {
     if (typeof config[key] !== "string" || config[key].trim() === "") {
-      throw new Error(`Missing non-empty ${key} in ${CONFIG_PATH}.`);
+      throw new Error(`Missing non-empty ${key} in ${source}.`);
     }
   }
 
   if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(config.subdomain)) {
-    throw new Error(`Invalid subdomain in ${CONFIG_PATH}.`);
+    throw new Error(`Invalid subdomain in ${source}.`);
   }
 
   return {
@@ -65,13 +65,28 @@ function validateConfig(config) {
 }
 
 async function loadConfig(root) {
+  const environmentKeys = ["ZENDESK_SUBDOMAIN", "ZENDESK_EMAIL", "ZENDESK_API_TOKEN"];
+  const hasEnvironmentConfig = environmentKeys.some((key) => process.env[key] !== undefined);
+  if (hasEnvironmentConfig) {
+    return validateConfig(
+      {
+        subdomain: process.env.ZENDESK_SUBDOMAIN,
+        email: process.env.ZENDESK_EMAIL,
+        apiToken: process.env.ZENDESK_API_TOKEN,
+      },
+      "the Zendesk environment variables",
+    );
+  }
+
   const configPath = path.join(root, CONFIG_PATH);
   let contents;
   try {
     contents = await readFile(configPath, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") {
-      throw new Error(`Missing ${CONFIG_PATH} in the current repository.`);
+      throw new Error(
+        `Missing Zendesk environment variables and ${CONFIG_PATH} in the current repository.`,
+      );
     }
     throw error;
   }
@@ -90,7 +105,7 @@ async function loadConfig(root) {
   }
 
   try {
-    return validateConfig(JSON.parse(contents));
+    return validateConfig(JSON.parse(contents), CONFIG_PATH);
   } catch (error) {
     if (error instanceof SyntaxError) {
       throw new Error(`${CONFIG_PATH} is not valid JSON.`);

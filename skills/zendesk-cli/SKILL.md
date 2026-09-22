@@ -17,8 +17,15 @@ Accept a Zendesk ticket URL or an explicit reference such as `Zendesk #12345`.
 Treat a bare number as unspecified. Extract the numeric ticket ID from a URL and
 require its subdomain to match the configured Zendesk subdomain.
 
-The CLI reads credentials from `.agents/zendesk.local.json` in the current
-repository:
+The CLI prefers these environment variables:
+
+- `ZENDESK_SUBDOMAIN`
+- `ZENDESK_EMAIL`
+- `ZENDESK_API_TOKEN`
+
+Use `keychain-env exec` to provide the token to the CLI. Do not print or store
+the token in a repository file. For backwards compatibility, the CLI can also
+read `.agents/zendesk.local.json` in the current repository:
 
 ```json
 {"subdomain":"example","email":"agent@example.com","apiToken":"secret"}
