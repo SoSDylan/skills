@@ -34,19 +34,17 @@ The parent calls the `subagent` tool with one or more labeled tasks:
     {
       "label": "Standards review",
       "prompt": "A self-contained standards-review handoff",
-      "capability": "read-only",
-      "profile": "review"
+      "capability": "read-only"
     },
     {
       "label": "Specification review",
-      "prompt": "A self-contained specification-review handoff",
-      "profile": "scout"
+      "prompt": "A self-contained specification-review handoff"
     }
   ]
 }
 ```
 
-`tasks` must contain from one to eight items. Each task must provide `label` and `prompt`; `capability` is optional and defaults to `read-only`. `profile` is optional and selects a configured model/thinking profile. If omitted, the child inherits the parent's model and thinking level.
+`tasks` must contain from one to eight items. Each task must provide `label` and `prompt`; `capability` is optional and defaults to `read-only`. Every child inherits the parent's current model and thinking level when the tool is called.
 
 ## Handoff prompts
 
@@ -58,37 +56,13 @@ A child does not receive the parent conversation. Each handoff should contain:
 4. Constraints, including whether edits are permitted
 5. The expected output
 
-The child starts in the parent's working directory and loads Pi's normal context files, including applicable `AGENTS.md` files. A selected profile can override the model and thinking level. Otherwise, both are inherited from the parent.
+The child starts in the parent's working directory and loads Pi's normal context files, including applicable `AGENTS.md` files.
 
-## Task profiles
+## Model and thinking level
 
-Use `/subagents` to manage profiles interactively. You can add, edit, and remove profiles. The model picker supports scrolling and fuzzy search. Each profile has:
+Subagents always use the parent's current model and thinking level. Change these in the parent with `/model` or `/thinking`; subsequent delegations inherit the new settings.
 
-- a model, entered as `provider/model` or inherited from the parent;
-- a thinking level, or inherited from the parent.
-
-The first session provides these defaults:
-
-| Profile | Model | Thinking |
-|---|---|---|
-| `scout` | Parent model | `low` |
-| `review` | Parent model | `medium` |
-| `worker` | Parent model | `high` |
-
-Changes are stored in `~/.pi/agent/subagents.json` (or the directory selected by `PI_CODING_AGENT_DIR`). The file uses this shape:
-
-```json
-{
-  "profiles": {
-    "review": {
-      "model": "anthropic/claude-sonnet-4-5",
-      "thinkingLevel": "medium"
-    }
-  }
-}
-```
-
-Use `/subagents list` to display the active profiles. Profile names may contain letters, numbers, `_`, and `-`.
+There are no separate subagent selectors or task profiles. The former `/subagents` command is removed. Existing `subagents.json` files are ignored and can be deleted.
 
 ## Capabilities
 

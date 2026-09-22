@@ -162,9 +162,10 @@ async function withFakePi(run: (fixture: { root: string; logPath: string }) => P
 	}
 }
 
-function loadExtensionWithCommands() {
+function loadExtensionWithCommands(getThinkingLevel: () => string = () => "high") {
 	const tools = new Map<string, RegisteredTool>();
 	const commands = new Map<string, RegisteredCommand>();
+	const hooks = new Set<string>();
 	extension({
 		registerTool(tool: RegisteredTool) {
 			tools.set(tool.name, tool);
@@ -172,12 +173,12 @@ function loadExtensionWithCommands() {
 		registerCommand(name: string, command: RegisteredCommand) {
 			commands.set(name, command);
 		},
-		on() {},
-		getThinkingLevel() {
-			return "high";
+		on(name: string) {
+			hooks.add(name);
 		},
+		getThinkingLevel,
 	} as any);
-	return { tools, commands };
+	return { tools, commands, hooks };
 }
 
 function loadExtension() {
@@ -259,35 +260,66 @@ test("parent can delegate one labeled task", async () => {
 	}
 });
 
-test("a configured task profile selects its model and thinking level", async () => {
+test("task schema exposes no profile, model, or thinking selectors", () => {
+	const tool = loadExtension();
+	assert.ok(tool);
+	assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["tasks"]);
+	assert.deepEqual(Object.keys(tool.parameters.properties.tasks.items.properties).sort(), [
+		"capability",
+		"label",
+		"prompt",
+	]);
+});
+
+test("extension registers no /subagents command or profile prompt hooks", () => {
+	const { tools, commands, hooks } = loadExtensionWithCommands();
+	assert.equal(commands.has("subagents"), false);
+	assert.equal(hooks.has("session_start"), false);
+	assert.equal(hooks.has("before_agent_start"), false);
+	const tool = tools.get("subagent");
+	assert.ok(tool);
+	assert.doesNotMatch([tool.description, ...(tool.promptGuidelines ?? [])].join("\n"), /profiles?|\/subagents/i);
+});
+
+test("existing subagents.json overrides and directly passed legacy selectors are ignored", async () => {
 	await withFakePi(async ({ root, logPath }) => {
 		const agentDir = join(root, "agent");
 		await mkdir(agentDir, { recursive: true });
-		await writeFile(
-			join(agentDir, "subagents.json"),
-			JSON.stringify({ profiles: { focused: { model: "test/profile-model", thinkingLevel: "low" } } }),
-		);
+		const configPath = join(agentDir, "subagents.json");
+		const config = JSON.stringify({ profiles: { focused: { model: "test/profile-model", thinkingLevel: "low" } } });
+		await writeFile(configPath, config);
 		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 		process.env.PI_CODING_AGENT_DIR = agentDir;
 		try {
 			const tool = loadExtension();
 			assert.ok(tool);
-			const result = await tool.execute(
-			"profile",
-			{ tasks: [{ label: "Focused", prompt: "inspect", profile: "focused" }] },
-			undefined,
-			undefined,
-			makeContext(root),
-		);
-			assert.match(result.content[0].text, /child:inspect/);
-			assert.equal(result.details.results[0].thinkingLevel, "low");
-			assert.equal(result.details.results[0].contextWindow, 128_000);
+			const tasks = [
+				{ label: "Default", prompt: "inspect default" },
+				{ label: "Legacy", prompt: "inspect legacy", profile: "focused" },
+				{ label: "Unknown", prompt: "inspect unknown", profile: "no-longer-configured" },
+				{
+					label: "Direct selectors",
+					prompt: "inspect direct selectors",
+					model: "test/profile-model",
+					thinking: "low",
+					thinkingLevel: "low",
+				},
+			];
+			const result = await tool.execute("legacy", { tasks }, undefined, undefined, makeContext(root));
+			assert.equal(result.details.results.length, tasks.length);
+			for (const child of result.details.results) {
+				assert.equal(child.status, "complete");
+				assert.equal(child.thinkingLevel, "high");
+				assert.equal(child.contextWindow, 272_000);
+			}
 
-			const call = (await readLog(logPath)).find((entry) => entry.event === "start");
-			assert.ok(call);
-			assert.ok(call.args.includes("test/profile-model"));
-			assert.ok(call.args.includes("--thinking"));
-			assert.ok(call.args.includes("low"));
+			const calls = (await readLog(logPath)).filter((entry) => entry.event === "start");
+			assert.equal(calls.length, tasks.length);
+			for (const call of calls) {
+				assert.deepEqual(call.args.slice(4, 8), ["--model", "test/parent-model", "--thinking", "high"]);
+				assert.doesNotMatch(call.systemPrompt, /profiles?|\/subagents/i);
+			}
+			assert.equal(await readFile(configPath, "utf8"), config);
 		} finally {
 			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
@@ -295,50 +327,59 @@ test("a configured task profile selects its model and thinking level", async () 
 	});
 });
 
-test("/subagents can add and remove profiles", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-subagent-profile-test-"));
-	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-	process.env.PI_CODING_AGENT_DIR = join(root, "agent");
-	try {
-		const { commands } = loadExtensionWithCommands();
-		const command = commands.get("subagents");
-		assert.ok(command);
-		const selections = ["Add profile", "Save", "Done"];
-		const inputs = ["custom"];
-		const notifications: string[] = [];
-		const context = {
-			cwd: root,
-			mode: "tui",
-			hasUI: true,
-			modelRegistry: { getAll: () => [] },
-			ui: {
-				select: async (_title: string, options: string[]) => {
-					const selected = selections.shift();
-					assert.ok(selected && options.includes(selected), `unexpected selection: ${selected}`);
-					return selected;
-				},
-				input: async () => inputs.shift(),
-				confirm: async () => true,
-				notify: (message: string) => notifications.push(message),
-			},
-		};
+test("each execute call inherits the current parent model and thinking level", async () => {
+	await withFakePi(async ({ root, logPath }) => {
+		let thinkingLevel = "high";
+		const { tools } = loadExtensionWithCommands(() => thinkingLevel);
+		const tool = tools.get("subagent");
+		assert.ok(tool);
+		const context = makeContext(root);
+		const first = await tool.execute("first", oneTask("first handoff"), undefined, undefined, context);
+		assert.equal(first.details.results[0].thinkingLevel, "high");
+		assert.equal(first.details.results[0].contextWindow, 272_000);
 
-		await command.handler("", context);
-		const configPath = join(root, "agent", "subagents.json");
-		let saved = JSON.parse(await readFile(configPath, "utf8"));
-		assert.deepEqual(saved.profiles.custom, {});
+		context.model = { provider: "other", id: "next-parent-model", contextWindow: 128_000 };
+		thinkingLevel = "low";
+		const second = await tool.execute("second", oneTask("second handoff"), undefined, undefined, context);
+		assert.equal(second.details.results[0].thinkingLevel, "low");
+		assert.equal(second.details.results[0].contextWindow, 128_000);
 
-		selections.push("Remove profile", "custom", "Done");
-		await command.handler("", context);
-		saved = JSON.parse(await readFile(configPath, "utf8"));
-		assert.equal(saved.profiles.custom, undefined);
-		assert.ok(notifications.some((message) => /Added subagent profile/.test(message)));
-		assert.ok(notifications.some((message) => /Removed subagent profile/.test(message)));
-	} finally {
-		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-		await rm(root, { recursive: true, force: true });
-	}
+		const calls = (await readLog(logPath)).filter((entry) => entry.event === "start");
+		assert.equal(calls.length, 2);
+		assert.deepEqual(calls[0].args.slice(4, 8), ["--model", "test/parent-model", "--thinking", "high"]);
+		assert.deepEqual(calls[1].args.slice(4, 8), ["--model", "other/next-parent-model", "--thinking", "low"]);
+	});
+});
+
+test("all parallel tasks inherit parent settings, including thinking off", async () => {
+	await withFakePi(async ({ root, logPath }) => {
+		let thinkingLevel = "high";
+		const { tools } = loadExtensionWithCommands(() => thinkingLevel);
+		const tool = tools.get("subagent");
+		assert.ok(tool);
+		for (const level of ["high", "off"]) {
+			thinkingLevel = level;
+			const tasks = Array.from({ length: 6 }, (_, index) => ({
+				label: `Task ${index + 1}`,
+				prompt: `[SLOW] ${level} task ${index + 1}`,
+				capability: index % 2 === 0 ? "read-only" : "write",
+			}));
+			const result = await tool.execute(level, { tasks }, undefined, undefined, makeContext(root));
+			assert.equal(result.details.results.length, tasks.length);
+			for (const child of result.details.results) {
+				assert.equal(child.status, "complete");
+				assert.equal(child.thinkingLevel, level);
+				assert.equal(child.contextWindow, 272_000);
+			}
+			const calls = (await readLog(logPath)).filter(
+				(entry) => entry.event === "start" && entry.prompt.startsWith(`[SLOW] ${level} `),
+			);
+			assert.equal(calls.length, tasks.length);
+			for (const call of calls) {
+				assert.deepEqual(call.args.slice(4, 8), ["--model", "test/parent-model", "--thinking", level]);
+			}
+		}
+	});
 });
 
 test("child JSON events preserve UTF-8 characters split across output chunks", async () => {
