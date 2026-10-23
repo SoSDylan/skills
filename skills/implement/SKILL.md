@@ -85,4 +85,5 @@ Report concisely:
 - known failures or remaining limitations
 
 Leave changes uncommitted unless the user requested a commit. When requested,
-use `/draft-commits` and wait for approval.
+use `draft-commits` in automatic mode. Wait for plan approval only when the user
+explicitly invokes `/draft-commits`.
