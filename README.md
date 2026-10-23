@@ -49,7 +49,7 @@ ln -s "$(pwd)/extensions/subagent" ~/.pi/agent/extensions/subagent
 
 Run `/reload` in Pi after installation. See
 [`extensions/subagent/README.md`](extensions/subagent/README.md) for handoff
-prompt guidance, capability profiles, and parallel execution.
+prompt guidance, full tool access, and parallel execution.
 
 ### Safe read
 
@@ -100,8 +100,8 @@ Distills non-derivable session lessons into the appropriate project agent docs a
 
 ### `draft-commits`
 
-Groups uncommitted changes into repository-matched commits, with user approval
-by default and scoped pre-authorization for directly invoked workflows.
+Groups uncommitted changes into repository-matched commits. Model-initiated use
+proceeds automatically; explicitly invoking `/draft-commits` requires plan approval.
 
 ### `keychain-env`
 
@@ -144,7 +144,7 @@ Drives a visible Google Chrome session from Pi with Playwright, including naviga
 
 ### `subagent`
 
-Runs parent-generated handoff prompts in isolated Pi processes. It supports read-only or write-capable children and bounded parallel execution. All children inherit the parent's current model and thinking level.
+Runs parent-generated handoff prompts in isolated Pi processes. Every child has full tool access; the parent sets allowed and prohibited actions in its prompt. Parallel execution is bounded. All children inherit the parent's current model and thinking level.
 
 ### `safe-read`
 
