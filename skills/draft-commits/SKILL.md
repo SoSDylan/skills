@@ -1,6 +1,6 @@
 ---
 name: draft-commits
-description: Draft and apply a repository-matched commit plan before creating Git commits. Always use before creating a Git commit. Require user approval unless a directly invoked workflow explicitly pre-authorizes commits for its own changes.
+description: Draft and apply a repository-matched commit plan before creating Git commits. Always use before creating a Git commit. Require plan approval only when the user explicitly invokes /draft-commits; model-initiated use proceeds without confirmation.
 ---
 
 # Draft Commits
@@ -10,20 +10,18 @@ applicable mode, then apply that exact plan.
 
 ## Authorization modes
 
-Use **approval-gated mode** by default.
+Use **approval-gated mode** only when the user explicitly invokes
+`/draft-commits` (or the equivalent explicit skill invocation). Present the plan
+and wait for approval before committing.
 
-Use **pre-authorized mode** only when all of these conditions are true:
+Use **automatic mode** when the model reaches this skill itself, including from
+another workflow or a subagent. A general request to commit is model-initiated
+use of this skill. Present the plan and apply it without requesting confirmation.
 
-- the user directly invoked the calling workflow
-- that workflow's documented contract states that invocation authorizes commits
-  for its own changes without a second confirmation
-- the workflow supplies the working-tree baseline captured before it made changes
-  and a manifest binding each run-owned path to its exact final status and content
-
-Pre-authorization covers only the bound content in manifest paths that were clean
-at the baseline. Route baseline changes, unrelated changes, ambiguous untracked
-files, and unresolved branch choices through approval-gated mode. Record the
-mode and its authorization source in the plan.
+Keep automatic commits within the current task's scope and existing repository
+instructions. Exclude unrelated or ambiguously owned changes. A calling workflow
+may supply a baseline and content manifest to establish ownership, but neither is
+required by this skill. Record the mode and invocation source in the plan.
 
 ## 1. Inspect conventions and changes
 
@@ -49,10 +47,9 @@ git branch --show-current
 ```
 
 Read untracked files needed to understand their purpose. In approval-gated mode,
-mark their inclusion as requiring the user's decision. In pre-authorized mode,
-include them only when they were absent from the supplied baseline and were
-produced by the calling workflow; otherwise mark them as awaiting a decision. If
-there are no changes, stop and report that.
+mark their inclusion as requiring the user's decision. In automatic mode,
+include those attributable to the current task and exclude unrelated or
+ambiguously owned files. If there are no changes, stop and report that.
 
 This step is complete when the repository's title and branch conventions are
 known and every changed path has been inspected and classified as staged,
@@ -77,8 +74,8 @@ listing it as excluded or awaiting an inclusion decision.
 
 Suggest the target branch with the plan. Use the current branch when it matches
 the work. Otherwise propose a branch name in the repository's observed style;
-when no convention is visible, describe the intended branch and ask the user to
-choose its name.
+when no convention is visible, propose a descriptive name. In automatic mode,
+resolve routine branch choices using the task context and repository instructions.
 
 This step is complete when the branch is explicit and every changed path is
 accounted for exactly once.
@@ -89,14 +86,14 @@ Present the complete plan in a reviewable form:
 
 ```text
 Authorization: approval required
-# or: pre-authorized by direct invocation of <workflow>
+# or: automatic — model-initiated use from <task or workflow>
 Suggested branch: use current branch <name>
 # or: create <proposed-name>
 
 Commit 1 — <title>
   <what changes and why>
   M  path/to/file — staged
-  A  path/to/other — untracked, include if authorized
+  A  path/to/other — untracked, proposed for inclusion
 
 Excluded:
   path/to/file — <reason>
@@ -107,13 +104,11 @@ inclusions, and exclusions. An unambiguous confirmation made in direct response
 to this complete plan authorizes it.
 
 Bind the artifact to the exact status and content inspected for every included
-path. In pre-authorized mode, verify that this content is within the authorized
-scope and that the plan contains no unresolved decision. Present the artifact
-and continue without pausing for a second confirmation. If either condition
-fails, use approval-gated mode for the complete plan.
+path. In automatic mode, verify that this content is within the current task's
+scope, present the artifact, and continue without pausing for confirmation.
 
 This step is complete when the content-bound artifact is presented and either
-awaits explicit approval or satisfies every pre-authorization condition.
+awaits explicit approval or is ready to apply in automatic mode.
 
 ## 4. Resolve plan authorization
 
@@ -122,19 +117,19 @@ exclusion, splitting, or merging. Present the complete revised plan again; each
 revision replaces the previous artifact and requires fresh approval. Questions
 that leave the plan unchanged do not create a revision.
 
-In pre-authorized mode, regrouping, title, or branch revisions remain authorized
-only when the exact included status and content stay unchanged and no unresolved
-user decision remains. Route every content or status revision through
-approval-gated mode.
+In automatic mode, inspect revisions for scope and ownership, update the
+complete plan, and continue without requesting approval.
 
 This step is complete when the current complete plan is either explicitly
-approved or validly pre-authorized.
+approved or ready to apply in automatic mode.
 
 ## 5. Apply the authorized plan
 
 Re-check the current branch, path statuses, and exact content before changing
-either the branch or index. If any value differs from the authorized artifact,
-present the updated complete plan in approval-gated mode.
+either the branch or index. If any value differs from the artifact, inspect the
+changes and present the updated complete plan in the same authorization mode.
+In approval-gated mode, obtain fresh approval before continuing. In automatic
+mode, continue once the revised plan is within scope and excludes ambiguous changes.
 
 Create the authorized branch when required. Apply each commit from an isolated
 temporary index so existing staged changes cannot enter it:
