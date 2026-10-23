@@ -20,7 +20,7 @@ Run `/reload` in Pi after installing or updating the extension.
 
 Ask Pi to delegate a self-contained task:
 
-> Use a read-only subagent to inspect the authentication implementation. Check `src/auth/` and report concrete security defects with file and line references.
+> Delegate an inspection of the authentication implementation. Tell the subagent to check `src/auth/`, report concrete security defects with file and line references, and not modify files or run commands that change state.
 
 For parallel work:
 
@@ -33,18 +33,17 @@ The parent calls the `subagent` tool with one or more labeled tasks:
   "tasks": [
     {
       "label": "Standards review",
-      "prompt": "A self-contained standards-review handoff",
-      "capability": "read-only"
+      "prompt": "Review the current change against our coding standards. Read files and inspect Git diffs. Do not modify files, run commands that change state, or create commits. Report concrete findings with file and line references."
     },
     {
       "label": "Specification review",
-      "prompt": "A self-contained specification-review handoff"
+      "prompt": "Review the current change against the issue requirements in docs/issue.md. Read files and inspect Git diffs. Do not modify files, run commands that change state, or create commits. Report unmet requirements with file and line references."
     }
   ]
 }
 ```
 
-`tasks` must contain from one to eight items. Each task must provide `label` and `prompt`; `capability` is optional and defaults to `read-only`. Every child inherits the parent's current model and thinking level when the tool is called.
+`tasks` must contain from one to eight items. Each task must provide only `label` and `prompt`. All children have access to all tools; the parent defines allowed and prohibited actions in the prompt. Every child inherits the parent's current model and thinking level when the tool is called.
 
 ## Handoff prompts
 
@@ -64,16 +63,17 @@ Subagents always use the parent's current model and thinking level. Change these
 
 There are no separate subagent selectors or task profiles. The former `/subagents` command is removed. Existing `subagents.json` files are ignored and can be deleted.
 
-## Capabilities
+## Tool access and permissions
 
-| Capability | Tools | Notes |
-|---|---|---|
-| `read-only` | `read`, `grep`, `find`, `ls` | Default. It cannot run shell commands or modify files. Include required diff or command output in the handoff when necessary. |
-| `write` | `read`, `grep`, `find`, `ls`, `bash`, `edit`, `write` | Can execute commands and modify the working tree. Use only for delegated implementation work. |
+Every child has access to all built-in tools and all tools registered by its loaded extensions. There are no capability profiles or per-task tool allowlists.
+
+The parent must state what the child may and may not do in each handoff. For example: "Read files and inspect Git diffs. Do not modify files, run commands that change state, or create commits." For implementation work, specify which files may change and which commands may run.
+
+These are prompt instructions, not a sandbox. Tool access does not grant permission to act outside the handoff. Global tool guards remain active.
 
 ## Execution behavior
 
-- Each child runs as an ephemeral `pi --mode json -p --no-session` process. Global Pi extensions remain active, so tool guards such as `safe-read` and `safe-grep` also protect child processes. The capability allowlist still controls which tools are active, and project-local resources follow Pi's normal trust rules.
+- Each child runs as an ephemeral `pi --mode json -p --no-session` process. Global Pi extensions remain active, so tool guards such as `safe-read` and `safe-grep` also protect child processes. At child startup, the extension activates every registered tool. Project-local resources follow Pi's normal trust rules.
 - The task list accepts up to eight items and runs at most four concurrently.
 - Parent cancellation terminates the delegation. Child cards are display-only and do not have separate cancellation controls.
 - A child cannot recursively delegate another subagent.
@@ -82,7 +82,7 @@ There are no separate subagent selectors or task profiles. The former `/subagent
 
 ## Live activity
 
-Each child has a separate card. Cards remain in request order and show the label, capability, state, and elapsed time on one header line.
+Each child has a separate card. Cards remain in request order and show the label, state, and elapsed time on one header line.
 
 When a child completes, its collapsed card shows the full final response and a usage row with turns, token counts, cost, context utilization, model, and thinking level. While it runs, the card shows the latest eight transcript lines. Use the configured tool-expansion key, `Ctrl+O` by default, to expand or collapse all child cards together.
 

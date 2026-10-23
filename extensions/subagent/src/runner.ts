@@ -3,10 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { Message, StopReason, Usage } from "@earendil-works/pi-ai";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import type { Capability } from "./capabilities.ts";
-import { toolsForCapability } from "./capabilities.ts";
 
-const SUBAGENT_SYSTEM_PROMPT = `You are an isolated subagent. Complete only the delegated task. You cannot ask the user questions. Return a concise, evidence-based result to the parent agent.`;
+const SUBAGENT_SYSTEM_PROMPT = `You are an isolated subagent. Complete only the delegated task. Follow the parent agent's permissions and constraints, including allowed and prohibited actions. Access to a tool is not permission to use it outside those instructions. You cannot ask the user questions. Return a concise, evidence-based result to the parent agent.`;
 const DEPTH_ENV = "PI_SUBAGENT_DEPTH";
 const COMMAND_ENV = "PI_SUBAGENT_PI_COMMAND";
 const MAX_ACTIVITY_LINES = 1000;
@@ -69,7 +67,6 @@ export interface ActivityTruncation {
 export interface SubagentRunResult {
 	label?: string;
 	prompt: string;
-	capability: Capability;
 	status: SubagentStatus;
 	startedAt?: number;
 	finishedAt?: number;
@@ -90,7 +87,6 @@ export interface SubagentRunResult {
 export interface RunSubagentOptions {
 	label?: string;
 	prompt: string;
-	capability: Capability;
 	cwd: string;
 	model?: { provider: string; id: string };
 	thinkingLevel?: string;
@@ -103,7 +99,6 @@ function initialResult(options: RunSubagentOptions): SubagentRunResult {
 	return {
 		label: options.label,
 		prompt: options.prompt,
-		capability: options.capability,
 		status: "running",
 		exitCode: -1,
 		messages: [],
@@ -511,7 +506,6 @@ export async function runSubagent(options: RunSubagentOptions): Promise<Subagent
 	const args = ["--mode", "json", "-p", "--no-session"];
 	if (options.model) args.push("--model", `${options.model.provider}/${options.model.id}`);
 	if (options.thinkingLevel) args.push("--thinking", options.thinkingLevel);
-	args.push("--tools", toolsForCapability(options.capability).join(","));
 	args.push("--append-system-prompt", systemPromptPath, options.prompt);
 
 	try {

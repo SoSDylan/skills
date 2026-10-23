@@ -2,9 +2,20 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { afterEach, beforeEach } from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import extension from "../index.ts";
+
+// Exercise parent behavior even when the test process itself is launched by a child agent.
+let previousTestDepth: string | undefined;
+beforeEach(() => {
+	previousTestDepth = process.env.PI_SUBAGENT_DEPTH;
+	process.env.PI_SUBAGENT_DEPTH = "0";
+});
+afterEach(() => {
+	if (previousTestDepth === undefined) delete process.env.PI_SUBAGENT_DEPTH;
+	else process.env.PI_SUBAGENT_DEPTH = previousTestDepth;
+});
 
 interface RegisteredTool {
 	name: string;
@@ -198,8 +209,8 @@ function makeContext(cwd: string) {
 	};
 }
 
-function oneTask(prompt: string, capability?: "read-only" | "write") {
-	return { tasks: [{ label: "Task", prompt, ...(capability ? { capability } : {}) }] };
+function oneTask(prompt: string) {
+	return { tasks: [{ label: "Task", prompt }] };
 }
 
 test("parent can delegate one labeled task", async () => {
@@ -220,7 +231,7 @@ test("parent can delegate one labeled task", async () => {
 		assert.deepEqual(tool.parameters?.properties.tasks.items.required, ["label", "prompt"]);
 		const result = await tool.execute("call-1", oneTask("Inspect src/auth.ts"), undefined, undefined, makeContext(root));
 		assert.match(result.content[0].text, /## Task — completed\n\nchild:Inspect src\/auth\.ts/);
-		assert.equal(result.details.results[0].capability, "read-only");
+		assert.equal(Object.hasOwn(result.details.results[0], "capability"), false);
 		assert.equal(result.details.results[0].thinkingLevel, "high");
 		assert.equal(result.details.results[0].contextWindow, 272_000);
 		assert.equal(result.details.results[0].usage.contextTokens, 15);
@@ -249,8 +260,7 @@ test("parent can delegate one labeled task", async () => {
 			"high",
 		]);
 		assert.ok(!call.args.includes("--no-extensions"));
-		assert.ok(call.args.includes("read,grep,find,ls"));
-		assert.ok(!call.args.includes("bash"));
+		assert.ok(!call.args.some((arg: string) => arg === "--tools" || arg.startsWith("--tools=")));
 	} finally {
 		if (previousCommand === undefined) delete process.env.PI_SUBAGENT_PI_COMMAND;
 		else process.env.PI_SUBAGENT_PI_COMMAND = previousCommand;
@@ -260,22 +270,19 @@ test("parent can delegate one labeled task", async () => {
 	}
 });
 
-test("task schema exposes no profile, model, or thinking selectors", () => {
+test("task schema exposes only label and prompt, with no capability or other selectors", () => {
 	const tool = loadExtension();
 	assert.ok(tool);
 	assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["tasks"]);
-	assert.deepEqual(Object.keys(tool.parameters.properties.tasks.items.properties).sort(), [
-		"capability",
-		"label",
-		"prompt",
-	]);
+	assert.deepEqual(Object.keys(tool.parameters.properties.tasks.items.properties).sort(), ["label", "prompt"]);
 });
 
-test("extension registers no /subagents command or profile prompt hooks", () => {
+test("parent extension registers no /subagents command or hooks", () => {
 	const { tools, commands, hooks } = loadExtensionWithCommands();
 	assert.equal(commands.has("subagents"), false);
 	assert.equal(hooks.has("session_start"), false);
 	assert.equal(hooks.has("before_agent_start"), false);
+	assert.equal(hooks.size, 0);
 	const tool = tools.get("subagent");
 	assert.ok(tool);
 	assert.doesNotMatch([tool.description, ...(tool.promptGuidelines ?? [])].join("\n"), /profiles?|\/subagents/i);
@@ -351,7 +358,7 @@ test("each execute call inherits the current parent model and thinking level", a
 	});
 });
 
-test("all parallel tasks inherit parent settings, including thinking off", async () => {
+test("all parallel tasks have the same unrestricted tool access and inherit parent settings, including thinking off", async () => {
 	await withFakePi(async ({ root, logPath }) => {
 		let thinkingLevel = "high";
 		const { tools } = loadExtensionWithCommands(() => thinkingLevel);
@@ -362,7 +369,6 @@ test("all parallel tasks inherit parent settings, including thinking off", async
 			const tasks = Array.from({ length: 6 }, (_, index) => ({
 				label: `Task ${index + 1}`,
 				prompt: `[SLOW] ${level} task ${index + 1}`,
-				capability: index % 2 === 0 ? "read-only" : "write",
 			}));
 			const result = await tool.execute(level, { tasks }, undefined, undefined, makeContext(root));
 			assert.equal(result.details.results.length, tasks.length);
@@ -370,6 +376,7 @@ test("all parallel tasks inherit parent settings, including thinking off", async
 				assert.equal(child.status, "complete");
 				assert.equal(child.thinkingLevel, level);
 				assert.equal(child.contextWindow, 272_000);
+				assert.equal(Object.hasOwn(child, "capability"), false);
 			}
 			const calls = (await readLog(logPath)).filter(
 				(entry) => entry.event === "start" && entry.prompt.startsWith(`[SLOW] ${level} `),
@@ -377,6 +384,10 @@ test("all parallel tasks inherit parent settings, including thinking off", async
 			assert.equal(calls.length, tasks.length);
 			for (const call of calls) {
 				assert.deepEqual(call.args.slice(4, 8), ["--model", "test/parent-model", "--thinking", level]);
+				assert.ok(!call.args.some((arg: string) => arg === "--tools" || arg.startsWith("--tools=")));
+				assert.ok(!call.args.includes("--no-extensions"));
+				assert.equal(call.depth, "1");
+				assert.equal(call.systemPrompt, calls[0].systemPrompt);
 			}
 		}
 	});
@@ -433,7 +444,7 @@ test("collapsed rendering shows each completed child's full final response", asy
 			{
 				tasks: [
 					{ label: "Files", prompt: "[LINES] inspect files" },
-					{ label: "Tests", prompt: "inspect tests", capability: "write" },
+					{ label: "Tests", prompt: "inspect tests" },
 				],
 			},
 			undefined,
@@ -450,8 +461,8 @@ test("collapsed rendering shows each completed child's full final response", asy
 		const rendered = component.render(100).join("\n");
 
 		assert.equal(tool.renderShell, "self");
-		assert.match(rendered, /Files · read-only · complete · \d[^\n]*\n[^\S\r\n]*\n[^\S\r\n]*line 1/);
-		assert.match(rendered, /Tests · write · complete · \d/);
+		assert.match(rendered, /Files · complete · \d[^\n]*\n[^\S\r\n]*\n[^\S\r\n]*line 1/);
+		assert.match(rendered, /Tests · complete · \d/);
 		assert.ok(rendered.indexOf("Files") < rendered.indexOf("Tests"));
 		for (let line = 1; line <= 10; line += 1) assert.match(rendered, new RegExp(`line ${line}`));
 		assert.match(rendered, /Ctrl\+O|activity/i);
@@ -485,7 +496,7 @@ test("collapsed cards retain long completed output and keep header metadata toge
 		initTheme();
 		const renderedLines = tool.renderResult(result, { expanded: false }, theme).render(60);
 
-		assert.equal(renderedLines.filter((line: string) => line.includes("read-only") || line.includes("complete")).length, 1);
+		assert.equal(renderedLines.filter((line: string) => line.includes("complete")).length, 1);
 		assert.equal(renderedLines.join("\n").match(/x/g)?.length, 300);
 	});
 });
@@ -496,7 +507,7 @@ test("expanded child cards show the prompt, full structured timeline, and usage 
 		assert.ok(tool?.renderResult);
 		const result = await tool.execute(
 			"expanded",
-			oneTask("[ACTIVITY] inspect auth", "read-only"),
+			oneTask("[ACTIVITY] inspect auth"),
 			undefined,
 			undefined,
 			makeContext(root),
@@ -510,7 +521,7 @@ test("expanded child cards show the prompt, full structured timeline, and usage 
 		const component = tool.renderResult(result, { expanded: true }, theme);
 		const rendered = component.render(100).join("\n");
 
-		assert.match(rendered, /Task · read-only · complete · \d/);
+		assert.match(rendered, /Task · complete · \d/);
 		assert.match(rendered, /Prompt.*\[ACTIVITY\] inspect auth/s);
 		assert.match(rendered, /thinking: Checking assumptions/);
 		assert.match(rendered, /✓ read src\/auth\.ts · 1 line · \d+ms/);
@@ -626,7 +637,6 @@ test("tool activity renders as compact command-log rows with tool-specific summa
 			{
 				label: "Tool formats",
 				prompt: "Inspect the tools",
-				capability: "write",
 				status: "running",
 				exitCode: -1,
 				messages: [],
@@ -649,7 +659,7 @@ test("tool activity renders as compact command-log rows with tool-specific summa
 	const toolResult = { content: [{ type: "text", text: "running" }], details };
 	const collapsed = tool.renderResult(toolResult, { expanded: false }, theme).render(180).join("\n");
 
-	assert.match(collapsed, /Tool formats · write · running · \d[^\n]*\n[^\S\r\n]*\n[^\S\r\n]*✓ read/);
+	assert.match(collapsed, /Tool formats · running · \d[^\n]*\n[^\S\r\n]*\n[^\S\r\n]*✓ read/);
 	assert.match(collapsed, /✓ read src\/auth\.ts:10-14 · 5 lines · 80ms/);
 	assert.match(collapsed, /✓ grep \/createSession\/ in src · 2 matches · 80ms/);
 	assert.match(collapsed, /✓ find \*\.test\.ts in src · 2 files · 80ms/);
@@ -673,7 +683,7 @@ test("tool activity renders as compact command-log rows with tool-specific summa
 		)
 		.render(180)
 		.join("\n");
-	assert.match(hiddenTranscript, /Tool formats · write · running · \d[^\n]*\n[^\S\r\n]*… earlier transcript content hidden/);
+	assert.match(hiddenTranscript, /Tool formats · running · \d[^\n]*\n[^\S\r\n]*… earlier transcript content hidden/);
 
 	const expanded = tool.renderResult(toolResult, { expanded: true }, theme).render(180).join("\n");
 	assert.match(expanded, /command.*npm test -- auth/s);
@@ -751,7 +761,6 @@ test("tool summaries handle context matches, empty results, notices, and images"
 			{
 				label: "Edge formats",
 				prompt: "Inspect edge formats",
-				capability: "read-only",
 				status: "running",
 				exitCode: -1,
 				messages: [],
@@ -1009,20 +1018,103 @@ test("parent can run independent handoffs in parallel with bounded concurrency",
 	});
 });
 
-test("write capability explicitly enables mutation tools", async () => {
+test("parent guidelines require allowed and prohibited actions in prompts and explain full tool access", () => {
+	const tool = loadExtension();
+	assert.ok(tool);
+	const guidelines = (tool.promptGuidelines ?? []).join("\n");
+	assert.match(guidelines, /allowed|permitted|permissions/i);
+	assert.match(guidelines, /prohibited|forbidden|must not|not allowed/i);
+	assert.match(guidelines, /all[^\n]*tools|tools[^\n]*all/i);
+	assert.doesNotMatch(guidelines, /capability|read-only subagents by default/i);
+});
+
+test("prompt restrictions pass unchanged without a CLI tool allowlist", async () => {
 	await withFakePi(async ({ root, logPath }) => {
 		const tool = loadExtension();
 		assert.ok(tool);
-		await tool.execute(
-			"write",
-			oneTask("Implement the approved change", "write"),
-			undefined,
-			undefined,
-			makeContext(root),
-		);
-		const call = (await readLog(logPath)).find((entry) => entry.event === "start");
-		assert.ok(call.args.includes("read,grep,find,ls,bash,edit,write"));
+		const prompts = [
+			"Inspect src/auth.ts.\nAllowed: read files and run grep.\nProhibited: edits, writes, shell commands, and commits.",
+			"Implement the approved change.\nAllowed: edit src/auth.ts and run npm test.\nProhibited: modifying other files or creating commits.",
+		];
+		for (const [index, prompt] of prompts.entries()) {
+			const result = await tool.execute(`permissions-${index}`, oneTask(prompt), undefined, undefined, makeContext(root));
+			assert.equal(result.details.results[0].prompt, prompt);
+			assert.equal(Object.hasOwn(result.details.results[0], "capability"), false);
+		}
+		const calls = (await readLog(logPath)).filter((entry) => entry.event === "start");
+		assert.deepEqual(calls.map((call) => call.prompt), prompts);
+		for (const call of calls) {
+			assert.ok(!call.args.some((arg: string) => arg === "--tools" || arg.startsWith("--tools=")));
+			assert.ok(!call.args.includes("--no-extensions"));
+			assert.match(call.systemPrompt, /parent[^.\n]*(?:permissions?|constraints?)/i);
+			assert.match(call.systemPrompt, /tool[^.\n]*(?:not|doesn't)[^.\n]*permission/i);
+		}
 	});
+});
+
+test("directly passed legacy capability values are ignored and absent from results and updates", async () => {
+	await withFakePi(async ({ root, logPath }) => {
+		const tool = loadExtension();
+		assert.ok(tool);
+		assert.equal(Object.hasOwn(tool.parameters.properties.tasks.items.properties, "capability"), false);
+		const tasks = ["read-only", "write", "obsolete"].map((capability) => ({
+			label: capability,
+			prompt: `Inspect the project for legacy ${capability}`,
+			capability,
+		}));
+		const updates: any[] = [];
+		const result = await tool.execute("legacy-capability", { tasks }, undefined, (update: any) => updates.push(update), makeContext(root));
+		assert.equal(result.details.results.length, tasks.length);
+		assert.ok(updates.length > 0);
+		for (const response of [result, ...updates]) {
+			for (const child of response.details.results) assert.equal(Object.hasOwn(child, "capability"), false);
+		}
+		const calls = (await readLog(logPath)).filter((entry) => entry.event === "start");
+		assert.equal(calls.length, tasks.length);
+		for (const call of calls) {
+			assert.ok(!call.args.some((arg: string) => arg === "--tools" || arg.startsWith("--tools=")));
+			assert.equal(call.systemPrompt, calls[0].systemPrompt);
+		}
+	});
+});
+
+test("child session_start enables all built-in and custom extension tools", async () => {
+	const previousDepth = process.env.PI_SUBAGENT_DEPTH;
+	try {
+		for (const depth of ["1", "2"]) {
+			process.env.PI_SUBAGENT_DEPTH = depth;
+			const hooks = new Map<string, (...args: any[]) => any>();
+			const availableTools = ["read", "grep", "find", "ls", "bash", "edit", "write"];
+			const activeToolUpdates: string[][] = [];
+			let getAllToolsCalls = 0;
+			extension({
+				registerTool() {},
+				registerCommand() {},
+				on(name: string, handler: (...args: any[]) => any) {
+					hooks.set(name, handler);
+				},
+				getThinkingLevel: () => "high",
+				getAllTools() {
+					getAllToolsCalls += 1;
+					return availableTools.map((name) => ({ name, description: `${name} tool` }));
+				},
+				setActiveTools(names: string[]) {
+					activeToolUpdates.push([...names]);
+				},
+			} as any);
+			assert.deepEqual([...hooks.keys()], ["session_start"]);
+			assert.equal(getAllToolsCalls, 0);
+			assert.deepEqual(activeToolUpdates, []);
+			// Other extensions can finish registering tools after this factory runs.
+			availableTools.push("custom_extension_tool");
+			await hooks.get("session_start")!({ type: "session_start", reason: "startup" }, {});
+			assert.equal(getAllToolsCalls, 1);
+			assert.deepEqual(activeToolUpdates, [["read", "grep", "find", "ls", "bash", "edit", "write", "custom_extension_tool"]]);
+		}
+	} finally {
+		if (previousDepth === undefined) delete process.env.PI_SUBAGENT_DEPTH;
+		else process.env.PI_SUBAGENT_DEPTH = previousDepth;
+	}
 });
 
 test("model failures produce a failed child state", async () => {

@@ -30,7 +30,7 @@ Or request a different deadline:
 { "pattern": "createSession", "path": "src", "timeout": 30 }
 ```
 
-The extension also loads in isolated children created by this repository's `subagent` extension. Those children retain their capability-based tool allowlist, while the global override enforces the deadline on selected `grep` calls.
+The extension also loads in isolated children created by this repository's `subagent` extension. Those children have full tool access, and the global override enforces the deadline on their `grep` calls.
 
 ## Verify
 

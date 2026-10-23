@@ -1,4 +1,4 @@
-import { StringEnum, type Usage } from "@earendil-works/pi-ai";
+import type { Usage } from "@earendil-works/pi-ai";
 import {
 	type ExtensionAPI,
 	DEFAULT_MAX_BYTES,
@@ -21,7 +21,6 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import type { Capability } from "./src/capabilities.ts";
 import {
 	emptyUsageStats,
 	failed,
@@ -36,15 +35,9 @@ const MAX_CONCURRENCY = 4;
 const COLLAPSED_TRANSCRIPT_LINES = 8;
 const DEPTH_ENV = "PI_SUBAGENT_DEPTH";
 
-const CapabilitySchema = StringEnum(["read-only", "write"] as const, {
-	description: 'Tool access for the child. Defaults to "read-only".',
-	default: "read-only",
-});
-
 const TaskSchema = Type.Object({
 	label: Type.String({ description: "Short label that distinguishes this task in output" }),
-	prompt: Type.String({ description: "Self-contained handoff prompt for the isolated child" }),
-	capability: Type.Optional(CapabilitySchema),
+	prompt: Type.String({ description: "Self-contained handoff prompt, including allowed and prohibited actions, for the isolated child" }),
 });
 
 const SubagentParameters = Type.Object({
@@ -481,7 +474,7 @@ function childHeader(
 	return new HeaderLine(
 		appearance.icon,
 		theme.fg("accent", theme.bold(label)),
-		` · ${theme.fg("dim", result.capability)} · ${result.status} · ${formatElapsed(result)}`,
+		` · ${result.status} · ${formatElapsed(result)}`,
 	);
 }
 
@@ -677,16 +670,24 @@ async function mapWithConcurrency<T, U>(
 }
 
 export default function subagentExtension(pi: ExtensionAPI): void {
+	if (Number.parseInt(process.env[DEPTH_ENV] ?? "0", 10) >= 1) {
+		// Pi enables only a subset of built-ins by default. Include every tool
+		// registered by the child, including tools from its loaded extensions.
+		pi.on("session_start", () => {
+			pi.setActiveTools(pi.getAllTools().map((tool) => tool.name));
+		});
+	}
+
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description:
-			"Run one or more self-contained prompts in isolated Pi processes. Children inherit the parent's current model and thinking level, but do not receive the parent conversation.",
+			"Run one or more self-contained prompts in isolated Pi processes. Children have access to all tools and inherit the parent's current model and thinking level, but do not receive the parent conversation. Define allowed and prohibited actions in each prompt.",
 		promptSnippet: "Delegate one or more independent tasks to isolated child agents",
 		promptGuidelines: [
 			"Use subagent when one or more independent tasks benefit from isolated context or concurrent work.",
 			"A subagent cannot see the parent conversation. Each subagent prompt must include the goal, relevant context and decisions, relevant paths or commands, constraints, and expected output.",
-			"Use read-only subagents by default. Select write capability only when the delegated task must modify files.",
+			"Every subagent has access to all tools. State allowed and prohibited actions explicitly in each subagent prompt. For read-only work, instruct the child not to modify files or run commands that change state.",
 		],
 		parameters: SubagentParameters,
 		renderShell: "self",
@@ -702,7 +703,6 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 			const current: SubagentRunResult[] = tasks.map((task) => ({
 				label: task.label,
 				prompt: task.prompt,
-				capability: (task.capability ?? "read-only") as Capability,
 				status: "queued",
 				exitCode: -1,
 				messages: [],
@@ -741,7 +741,6 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 				const result = await runSubagent({
 					label: task.label,
 					prompt: task.prompt,
-					capability: (task.capability ?? "read-only") as Capability,
 					cwd: ctx.cwd,
 					model,
 					thinkingLevel,

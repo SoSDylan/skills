@@ -33,7 +33,7 @@ Or request a different deadline:
 { "path": "large-report.txt", "timeout": 30 }
 ```
 
-The extension also loads in isolated children created by this repository's `subagent` extension. Those children retain their capability-based tool allowlist, while global extensions can still guard the selected tools.
+The extension also loads in isolated children created by this repository's `subagent` extension. Those children have full tool access, and global extensions still guard their tool calls.
 
 ## Verify
 
