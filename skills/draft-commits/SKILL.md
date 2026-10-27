@@ -46,6 +46,12 @@ git diff --stat
 git branch --show-current
 ```
 
+Read every diff in full. If tool output is truncated, read the saved output in
+chunks or request smaller per-path diffs until every omitted section is inspected.
+A diff summary or content hash does not substitute for reading the changes. For
+binary changes, inspect the file with an appropriate tool and state any inspection
+limits in the plan.
+
 Read untracked files needed to understand their purpose. In approval-gated mode,
 mark their inclusion as requiring the user's decision. In automatic mode,
 include those attributable to the current task and exclude unrelated or
@@ -103,9 +109,21 @@ In approval-gated mode, ask the user to review the branch, grouping, titles,
 inclusions, and exclusions. An unambiguous confirmation made in direct response
 to this complete plan authorizes it.
 
-Bind the artifact to the exact status and content inspected for every included
-path. In automatic mode, verify that this content is within the current task's
-scope, present the artifact, and continue without pausing for confirmation.
+Before presenting the artifact, save a content manifest outside the repository.
+Record the current branch and HEAD, and for each included path record its Git
+status, index blob ID and mode, and working-tree content hash and mode (or an
+explicit absent/deleted marker). Include untracked files and symlink targets.
+Hash working-tree content without Git filters. Record whether each planned commit
+uses index content, working-tree content, or an explicitly selected patch; retain
+the exact binary diff for each planned commit. Partial staging must preserve that
+selection rather than silently including the whole working-tree file.
+
+Include the manifest location and its SHA-256 fingerprint in the artifact. This
+binds authorization to the inspected content, not a snapshot first captured after
+approval. Keep the manifest until all authorized commits are verified.
+
+In automatic mode, verify that this content is within the current task's scope,
+present the artifact, and continue without pausing for confirmation.
 
 This step is complete when the content-bound artifact is presented and either
 awaits explicit approval or is ready to apply in automatic mode.
@@ -125,9 +143,12 @@ approved or ready to apply in automatic mode.
 
 ## 5. Apply the authorized plan
 
-Re-check the current branch, path statuses, and exact content before changing
-either the branch or index. If any value differs from the artifact, inspect the
-changes and present the updated complete plan in the same authorization mode.
+Before changing either the branch or index, recompute the saved manifest from
+current branch, HEAD, path statuses, index content and working-tree content.
+Compare it with the manifest fingerprint presented in the artifact; do not replace
+the original with a fresh baseline. If any value differs, inspect the changes and
+present an updated complete plan with a new manifest and fingerprint in the same
+authorization mode.
 In approval-gated mode, obtain fresh approval before continuing. In automatic
 mode, continue once the revised plan is within scope and excludes ambiguous changes.
 
@@ -137,7 +158,9 @@ temporary index so existing staged changes cannot enter it:
 1. Record the current `HEAD` as the parent. Create a temporary index, initialize
    it from that parent, and stage the commit's exact paths into it.
 2. Inspect the temporary index's complete `--name-status` and `--binary` cached
-   diff. Continue only when both match the artifact exactly.
+   diff, reading any truncated output in chunks. Compare both with the exact
+   planned diff saved before authorization, not a new diff captured at apply time.
+   Continue only when paths, modes and content match exactly.
 3. Commit with the temporary index by setting `GIT_INDEX_FILE` for `git commit`.
    Use one `-m` value and no commit body.
 4. Record the created hash and verify its complete paths and content against the
