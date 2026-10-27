@@ -88,6 +88,12 @@ approved cleanup plan for selected candidate IDs.
 Implements work from a spec or set of tickets in one bounded implementation,
 verification, and stabilization pass.
 
+### `implement-strategically`
+
+Implements features or fixes through surrounding-system exploration, deliberate
+reuse, bounded refactoring, verification, and a report of design decisions and
+related cleanups.
+
 ### `implement-spec`
 
 Implements a specification as one PR with sequential ticket agents on one shared
