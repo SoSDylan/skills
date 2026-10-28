@@ -39,13 +39,23 @@ Before choosing files to change:
    commands. Distinguish established conventions from incidental or legacy
    patterns using repository guidance and actual usage.
 
+For shared infrastructure, make the interface concrete before building it:
+
+- Inspect one ordinary consumer using defaults and one real customized consumer
+  when present. Existing callers or focused test fixtures can serve as examples.
+- Trace one input through processing to output, naming the owner and data
+  representation at each transformation.
+- Record when no customized consumer exists; that is not a reason to invent an
+  extension point.
+
 For UI work, find the app's shared primitives, such as Button, before choosing
 native elements or creating replacements. Follow established primitives and
 conventions wherever they apply.
 
 Complete when the relevant flow, reusable candidates, intended owner, affected
-consumers, and checks are known. Briefly explain what you found and why the
-proposed approach fits, then proceed within the agreed scope.
+consumers, and checks are known; shared-infrastructure changes also have concrete
+consumer examples and an execution trace. Briefly explain what you found and why
+the proposed approach fits, then proceed within the agreed scope.
 
 ## 3. Choose and implement a coherent change
 
@@ -86,14 +96,19 @@ test suite once when practical. Include affected consumers and adjacent flows,
 especially when extending shared code. Fix failures introduced by the change;
 report verified pre-existing failures separately.
 
+Before delegating review, perform the architectural pass: check ownership,
+duplicated rules, scattered special cases, shared primitive usage, compatibility
+with existing consumers, and code made obsolete by the change. Remove obsolete
+code caused by this work. For shared infrastructure, exercise the consumer
+examples against the final interface and recheck the execution trace, including
+any serialization and delivery steps. Passing tests does not replace this pass.
+
 Review the complete change, including untracked files, against the original
 request and repository standards. When available, invoke `code-review` once,
 supplying the original spec or request, `git diff HEAD`, and all paths from
-`git ls-files --others --exclude-standard`. Otherwise perform the review directly.
-
-Include an architectural pass: check ownership, duplicated rules, scattered
-special cases, shared primitive usage, compatibility with existing consumers,
-and code made obsolete by the change. Remove obsolete code caused by this work.
+`git ls-files --others --exclude-standard`. For shared infrastructure, also supply
+the consumer-example paths and final execution trace. Otherwise perform the
+review directly. This is agent legwork, not an additional user-approval gate.
 
 Triage findings, fix implementation-caused problems in one correction pass,
 and rerun affected checks. Report unrelated improvements and remaining findings
